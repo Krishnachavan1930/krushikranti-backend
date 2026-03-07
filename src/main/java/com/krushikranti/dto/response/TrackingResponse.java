@@ -22,9 +22,14 @@ public class TrackingResponse {
     private String trackingUrl;
     private String courierName;
     private List<Map<String, Object>> trackingActivities;
-    
+
     // Order details
     private Long orderId;
+    private String orderNumber;
     private String orderStatus;
     private String deliveryStatus;
+
+    // Delivery partner info
+    private String deliveryPartnerName;
+    private String deliveryPartnerPhone;
 }

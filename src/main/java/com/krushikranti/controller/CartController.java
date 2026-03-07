@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 @Tag(name = "Cart", description = "Shopping cart management endpoints")
 @SecurityRequirement(name = "bearerAuth")
-@PreAuthorize("hasAnyRole('USER', 'WHOLESALER')")
+@PreAuthorize("hasRole('USER')")
 public class CartController {
 
     private final CartService cartService;

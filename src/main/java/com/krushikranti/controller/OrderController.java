@@ -2,6 +2,8 @@ package com.krushikranti.controller;
 
 import com.krushikranti.dto.request.OrderRequest;
 import com.krushikranti.dto.request.OrderStatusUpdateRequest;
+import com.krushikranti.dto.request.AssignDeliveryPartnerRequest;
+import com.krushikranti.dto.request.DeliveryStatusUpdateRequest;
 import com.krushikranti.dto.response.ApiResponse;
 import com.krushikranti.dto.response.OrderResponse;
 import com.krushikranti.dto.response.TrackingResponse;
@@ -77,7 +79,8 @@ public class OrderController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(required = false) Order.OrderStatus status) {
-        Page<OrderResponse> orders = orderService.getFarmerOrdersPaginated(authentication.getName(), page, size, status);
+        Page<OrderResponse> orders = orderService.getFarmerOrdersPaginated(authentication.getName(), page, size,
+                status);
         return ResponseEntity.ok(ApiResponse.success("Farmer orders fetched successfully", orders));
     }
 
@@ -89,12 +92,42 @@ public class OrderController {
         return ResponseEntity.ok(ApiResponse.success("Order fetched successfully", order));
     }
 
-    @GetMapping("/{orderId}/tracking")
-    @Operation(summary = "Get tracking information for an order")
+    @GetMapping("/{orderId}/track")
+    @Operation(summary = "Get tracking information for an order by ID")
     @PreAuthorize("hasAnyRole('USER', 'FARMER', 'WHOLESALER', 'ADMIN')")
     public ResponseEntity<ApiResponse<TrackingResponse>> getOrderTracking(@PathVariable Long orderId) {
         TrackingResponse tracking = orderService.getOrderTracking(orderId);
         return ResponseEntity.ok(ApiResponse.success("Tracking information fetched successfully", tracking));
+    }
+
+    @GetMapping("/track/{orderNumber}")
+    @Operation(summary = "Get tracking information for an order by order number")
+    @PreAuthorize("hasAnyRole('USER', 'FARMER', 'WHOLESALER', 'ADMIN')")
+    public ResponseEntity<ApiResponse<TrackingResponse>> getOrderTrackingByNumber(@PathVariable String orderNumber) {
+        TrackingResponse tracking = orderService.getOrderTrackingByOrderNumber(orderNumber);
+        return ResponseEntity.ok(ApiResponse.success("Tracking information fetched successfully", tracking));
+    }
+
+    @PostMapping("/{id}/cancel")
+    @Operation(summary = "Cancel an order (only if pending)")
+    @PreAuthorize("hasAnyRole('USER', 'FARMER', 'WHOLESALER', 'ADMIN')")
+    public ResponseEntity<ApiResponse<OrderResponse>> cancelOrder(
+            @PathVariable Long id,
+            Authentication authentication) {
+        OrderResponse cancelled = orderService.cancelOrder(id, authentication.getName());
+        return ResponseEntity.ok(ApiResponse.success("Order cancelled successfully", cancelled));
+    }
+
+    @GetMapping
+    @Operation(summary = "Get paginated orders for authenticated user")
+    @PreAuthorize("hasAnyRole('USER', 'FARMER', 'WHOLESALER', 'ADMIN')")
+    public ResponseEntity<ApiResponse<Page<OrderResponse>>> getOrders(
+            Authentication authentication,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) Order.OrderStatus status) {
+        Page<OrderResponse> orders = orderService.getUserOrdersPaginated(authentication.getName(), page, size, status);
+        return ResponseEntity.ok(ApiResponse.success("Orders fetched successfully", orders));
     }
 
     @PutMapping("/{id}/status")
@@ -114,6 +147,44 @@ public class OrderController {
         OrderResponse updated = orderService.processPaymentAndCreateShipment(id);
         return ResponseEntity.ok(ApiResponse.success("Shipment created successfully", updated));
     }
+
+    // ── Delivery Partner Endpoints ───────────────────────────────────────────
+
+    @PostMapping("/{id}/assign-delivery")
+    @Operation(summary = "Assign a delivery partner to an order (Admin only)")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<OrderResponse>> assignDeliveryPartner(
+            @PathVariable Long id,
+            @Valid @RequestBody AssignDeliveryPartnerRequest request) {
+        OrderResponse updated = orderService.assignDeliveryPartner(id, request.getDeliveryPartnerId(),
+                request.getNotes());
+        return ResponseEntity.ok(ApiResponse.success("Delivery partner assigned successfully", updated));
+    }
+
+    @PutMapping("/{id}/delivery-status")
+    @Operation(summary = "Update delivery status (Delivery partner or Admin)")
+    @PreAuthorize("hasAnyRole('USER', 'FARMER', 'WHOLESALER', 'ADMIN')")
+    public ResponseEntity<ApiResponse<OrderResponse>> updateDeliveryStatus(
+            @PathVariable Long id,
+            @Valid @RequestBody DeliveryStatusUpdateRequest request) {
+        OrderResponse updated = orderService.updateDeliveryStatus(id, request.getDeliveryStatus());
+        return ResponseEntity.ok(ApiResponse.success("Delivery status updated successfully", updated));
+    }
+
+    @GetMapping("/delivery/assigned")
+    @Operation(summary = "Get orders assigned to authenticated delivery partner")
+    @PreAuthorize("hasAnyRole('USER', 'FARMER', 'WHOLESALER', 'ADMIN')")
+    public ResponseEntity<ApiResponse<Page<OrderResponse>>> getDeliveryPartnerOrders(
+            Authentication authentication,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) Order.DeliveryStatus deliveryStatus) {
+        Page<OrderResponse> orders = orderService.getDeliveryPartnerOrders(authentication.getName(), page, size,
+                deliveryStatus);
+        return ResponseEntity.ok(ApiResponse.success("Delivery orders fetched successfully", orders));
+    }
+
+    // ── Admin Endpoints ──────────────────────────────────────────────────────
 
     @GetMapping("/admin/all")
     @Operation(summary = "Get all orders (Admin only)")

@@ -65,9 +65,13 @@ public class OrderService {
                                 .setScale(2, RoundingMode.HALF_UP);
 
                 Order order = Order.builder()
+                                .orderNumber("KK-"
+                                                + java.util.UUID.randomUUID().toString().substring(0, 8).toUpperCase())
                                 .user(user)
+                                .buyer(user)
                                 .product(product)
                                 .quantity(request.getQuantity())
+                                .totalAmount(totalPrice)
                                 .totalPrice(totalPrice)
                                 .status(Order.OrderStatus.PENDING)
                                 .adminCommission(adminCommission)
@@ -104,11 +108,12 @@ public class OrderService {
                                 .collect(Collectors.toList());
         }
 
-        public Page<OrderResponse> getUserOrdersPaginated(String userEmail, int page, int size, Order.OrderStatus status) {
+        public Page<OrderResponse> getUserOrdersPaginated(String userEmail, int page, int size,
+                        Order.OrderStatus status) {
                 User user = userRepository.findByEmail(userEmail)
                                 .orElseThrow(() -> new ResourceNotFoundException("User", "email", userEmail));
                 Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-                
+
                 Page<Order> orders;
                 if (status != null) {
                         orders = orderRepository.findByUserAndStatus(user, status, pageable);
@@ -126,11 +131,12 @@ public class OrderService {
                                 .collect(Collectors.toList());
         }
 
-        public Page<OrderResponse> getFarmerOrdersPaginated(String farmerEmail, int page, int size, Order.OrderStatus status) {
+        public Page<OrderResponse> getFarmerOrdersPaginated(String farmerEmail, int page, int size,
+                        Order.OrderStatus status) {
                 User farmer = userRepository.findByEmail(farmerEmail)
                                 .orElseThrow(() -> new ResourceNotFoundException("User", "email", farmerEmail));
                 Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-                
+
                 Page<Order> orders;
                 if (status != null) {
                         orders = orderRepository.findByProductFarmerAndStatus(farmer, status, pageable);
@@ -153,7 +159,7 @@ public class OrderService {
 
                 String oldStatus = order.getStatus().name();
                 order.setStatus(status);
-                
+
                 Order savedOrder = orderRepository.save(order);
 
                 // Send notification
@@ -181,20 +187,20 @@ public class OrderService {
                 // Create shipment with Shiprocket
                 try {
                         ShipmentResponse shipmentResponse = shiprocketService.createShipment(order);
-                        
+
                         if (shipmentResponse.isSuccess()) {
                                 order.setShipmentId(shipmentResponse.getShipmentId());
                                 order.setAwbCode(shipmentResponse.getAwbCode());
                                 order.setCourierName(shipmentResponse.getCourierName());
                                 order.setDeliveryStatus(Order.DeliveryStatus.PICKUP_SCHEDULED);
                                 order.setTrackingStatus("Shipment Created");
-                                
+
                                 if (shipmentResponse.getAwbCode() != null) {
                                         order.setStatus(Order.OrderStatus.SHIPPED);
                                 }
-                                
+
                                 orderRepository.save(order);
-                                
+
                                 // Send notification
                                 notificationService.notifyShipmentUpdate(order, "Shipment Created");
                         }
@@ -214,15 +220,23 @@ public class OrderService {
 
                 TrackingResponse response = new TrackingResponse();
                 response.setOrderId(orderId);
+                response.setOrderNumber(order.getOrderNumber());
                 response.setOrderStatus(order.getStatus().name());
                 response.setDeliveryStatus(order.getDeliveryStatus() != null ? order.getDeliveryStatus().name() : null);
                 response.setCourierName(order.getCourierName());
                 response.setAwbCode(order.getAwbCode());
+                response.setEstimatedDelivery(
+                                order.getEstimatedDelivery() != null ? order.getEstimatedDelivery().toString() : null);
+
+                // Delivery partner info
+                response.setDeliveryPartnerName(order.getDeliveryPartnerName());
+                response.setDeliveryPartnerPhone(order.getDeliveryPartnerPhone());
 
                 // If we have AWB code, fetch real-time tracking from Shiprocket
                 if (order.getAwbCode() != null && !order.getAwbCode().isEmpty()) {
                         try {
-                                TrackingResponse shiprocketTracking = shiprocketService.getTrackingInfo(order.getAwbCode());
+                                TrackingResponse shiprocketTracking = shiprocketService
+                                                .getTrackingInfo(order.getAwbCode());
                                 if (shiprocketTracking.isSuccess()) {
                                         response.setCurrentStatus(shiprocketTracking.getCurrentStatus());
                                         response.setCurrentLocation(shiprocketTracking.getCurrentLocation());
@@ -245,11 +259,166 @@ public class OrderService {
         }
 
         /**
+         * Get tracking information for an order by order number
+         */
+        public TrackingResponse getOrderTrackingByOrderNumber(String orderNumber) {
+                Order order = orderRepository.findByOrderNumber(orderNumber)
+                                .orElseThrow(() -> new ResourceNotFoundException("Order", "orderNumber", orderNumber));
+                return getOrderTracking(order.getId());
+        }
+
+        /**
+         * Cancel an order (only if status is PENDING)
+         */
+        @Transactional
+        public OrderResponse cancelOrder(Long orderId, String userEmail) {
+                Order order = orderRepository.findById(orderId)
+                                .orElseThrow(() -> new ResourceNotFoundException("Order", "id", orderId));
+
+                User user = userRepository.findByEmail(userEmail)
+                                .orElseThrow(() -> new ResourceNotFoundException("User", "email", userEmail));
+
+                // Verify ownership or admin
+                boolean isAdmin = user.getRole() == User.Role.ROLE_ADMIN;
+                if (!isAdmin && !order.getUser().getId().equals(user.getId())) {
+                        throw new SecurityException("You can only cancel your own orders");
+                }
+
+                // Only allow cancellation of PENDING orders
+                if (order.getStatus() != Order.OrderStatus.PENDING) {
+                        throw new IllegalStateException("Only pending orders can be cancelled. Current status: " + order.getStatus());
+                }
+
+                String oldStatus = order.getStatus().name();
+                order.setStatus(Order.OrderStatus.CANCELLED);
+
+                // Restore product stock
+                order.getProduct().setQuantity(order.getProduct().getQuantity() + order.getQuantity());
+
+                Order savedOrder = orderRepository.save(order);
+
+                // Send notification
+                try {
+                        notificationService.notifyOrderStatusChange(savedOrder, oldStatus, "CANCELLED");
+                } catch (Exception e) {
+                        log.error("Failed to send order cancellation notification", e);
+                }
+
+                return OrderResponse.fromEntity(savedOrder);
+        }
+
+        /**
+         * Assign a delivery partner to an order (Admin only)
+         */
+        @Transactional
+        public OrderResponse assignDeliveryPartner(Long orderId, Long deliveryPartnerId, String notes) {
+                Order order = orderRepository.findById(orderId)
+                                .orElseThrow(() -> new ResourceNotFoundException("Order", "id", orderId));
+
+                User deliveryPartner = userRepository.findById(deliveryPartnerId)
+                                .orElseThrow(() -> new ResourceNotFoundException("User", "id", deliveryPartnerId));
+
+                order.setDeliveryPartner(deliveryPartner);
+                order.setDeliveryPartnerName(
+                                deliveryPartner.getFirstName() + " " +
+                                                (deliveryPartner.getLastName() != null ? deliveryPartner.getLastName()
+                                                                : ""));
+                order.setDeliveryPartnerPhone(deliveryPartner.getPhone());
+                if (notes != null && !notes.isEmpty()) {
+                        order.setDeliveryNotes(notes);
+                }
+
+                Order savedOrder = orderRepository.save(order);
+
+                // Send WebSocket notification to delivery partner
+                try {
+                        notificationService.createNotification(
+                                        deliveryPartner,
+                                        "New Delivery Assignment",
+                                        String.format("You have been assigned to deliver Order #%s (%s)",
+                                                        order.getOrderNumber(),
+                                                        order.getProduct().getName()),
+                                        com.krushikranti.model.Notification.NotificationType.SYSTEM,
+                                        orderId,
+                                        "ORDER");
+                } catch (Exception e) {
+                        log.error("Failed to notify delivery partner for order: {}", orderId, e);
+                }
+
+                return OrderResponse.fromEntity(savedOrder);
+        }
+
+        /**
+         * Update delivery status (by delivery partner or admin)
+         */
+        @Transactional
+        public OrderResponse updateDeliveryStatus(Long orderId, Order.DeliveryStatus newDeliveryStatus) {
+                Order order = orderRepository.findById(orderId)
+                                .orElseThrow(() -> new ResourceNotFoundException("Order", "id", orderId));
+
+                String oldStatus = order.getDeliveryStatus() != null ? order.getDeliveryStatus().name() : "NONE";
+                order.setDeliveryStatus(newDeliveryStatus);
+
+                // Auto-update order status based on delivery status
+                switch (newDeliveryStatus) {
+                        case PICKED_UP, IN_TRANSIT -> {
+                                order.setStatus(Order.OrderStatus.SHIPPED);
+                                order.setTrackingStatus("In Transit");
+                        }
+                        case OUT_FOR_DELIVERY -> {
+                                order.setStatus(Order.OrderStatus.SHIPPED);
+                                order.setTrackingStatus("Out for Delivery");
+                        }
+                        case DELIVERED -> {
+                                order.setStatus(Order.OrderStatus.DELIVERED);
+                                order.setTrackingStatus("Delivered");
+                        }
+                        case CANCELLED, RETURNED -> {
+                                order.setTrackingStatus(newDeliveryStatus.name());
+                        }
+                        default -> {
+                        }
+                }
+
+                Order savedOrder = orderRepository.save(order);
+
+                // Send WebSocket notification to customer
+                try {
+                        notificationService.notifyOrderStatusChange(savedOrder, oldStatus,
+                                        newDeliveryStatus.name());
+                } catch (Exception e) {
+                        log.error("Failed to send delivery status notification for order: {}", orderId, e);
+                }
+
+                return OrderResponse.fromEntity(savedOrder);
+        }
+
+        /**
+         * Get orders assigned to a delivery partner
+         */
+        public Page<OrderResponse> getDeliveryPartnerOrders(String deliveryPartnerEmail, int page, int size,
+                        Order.DeliveryStatus deliveryStatus) {
+                User deliveryPartner = userRepository.findByEmail(deliveryPartnerEmail)
+                                .orElseThrow(() -> new ResourceNotFoundException("User", "email",
+                                                deliveryPartnerEmail));
+                Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+
+                Page<Order> orders;
+                if (deliveryStatus != null) {
+                        orders = orderRepository.findByDeliveryPartnerAndDeliveryStatus(deliveryPartner,
+                                        deliveryStatus, pageable);
+                } else {
+                        orders = orderRepository.findByDeliveryPartner(deliveryPartner, pageable);
+                }
+                return orders.map(OrderResponse::fromEntity);
+        }
+
+        /**
          * Get all orders for admin
          */
         public Page<OrderResponse> getAllOrders(int page, int size, Order.OrderStatus status) {
                 Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-                
+
                 Page<Order> orders;
                 if (status != null) {
                         orders = orderRepository.findByStatus(status, pageable);
@@ -264,7 +433,7 @@ public class OrderService {
          */
         public AdminOrderStats getAdminStats() {
                 List<Order> allOrders = orderRepository.findAll();
-                
+
                 long totalOrders = allOrders.size();
                 BigDecimal totalRevenue = allOrders.stream()
                                 .filter(o -> o.getStatus() != Order.OrderStatus.CANCELLED)
@@ -274,14 +443,14 @@ public class OrderService {
                                 .filter(o -> o.getStatus() != Order.OrderStatus.CANCELLED)
                                 .map(o -> o.getAdminCommission() != null ? o.getAdminCommission() : BigDecimal.ZERO)
                                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-                
+
                 long pendingOrders = allOrders.stream()
-                                .filter(o -> o.getStatus() == Order.OrderStatus.PENDING || 
-                                             o.getStatus() == Order.OrderStatus.CONFIRMED)
+                                .filter(o -> o.getStatus() == Order.OrderStatus.PENDING ||
+                                                o.getStatus() == Order.OrderStatus.CONFIRMED)
                                 .count();
                 long shippedOrders = allOrders.stream()
-                                .filter(o -> o.getStatus() == Order.OrderStatus.SHIPPED || 
-                                             o.getStatus() == Order.OrderStatus.PROCESSING)
+                                .filter(o -> o.getStatus() == Order.OrderStatus.SHIPPED ||
+                                                o.getStatus() == Order.OrderStatus.PROCESSING)
                                 .count();
                 long deliveredOrders = allOrders.stream()
                                 .filter(o -> o.getStatus() == Order.OrderStatus.DELIVERED)
@@ -303,19 +472,19 @@ public class OrderService {
         public FarmerOrderStats getFarmerStats(String farmerEmail) {
                 User farmer = userRepository.findByEmail(farmerEmail)
                                 .orElseThrow(() -> new ResourceNotFoundException("User", "email", farmerEmail));
-                
+
                 List<Order> farmerOrders = orderRepository.findByProductFarmer(farmer);
-                
+
                 long totalOrders = farmerOrders.size();
                 BigDecimal totalEarnings = farmerOrders.stream()
                                 .filter(o -> o.getStatus() != Order.OrderStatus.CANCELLED)
                                 .map(o -> o.getFarmerAmount() != null ? o.getFarmerAmount() : BigDecimal.ZERO)
                                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-                
+
                 long pendingOrders = farmerOrders.stream()
-                                .filter(o -> o.getStatus() == Order.OrderStatus.PENDING || 
-                                             o.getStatus() == Order.OrderStatus.CONFIRMED ||
-                                             o.getStatus() == Order.OrderStatus.PROCESSING)
+                                .filter(o -> o.getStatus() == Order.OrderStatus.PENDING ||
+                                                o.getStatus() == Order.OrderStatus.CONFIRMED ||
+                                                o.getStatus() == Order.OrderStatus.PROCESSING)
                                 .count();
                 long completedOrders = farmerOrders.stream()
                                 .filter(o -> o.getStatus() == Order.OrderStatus.DELIVERED)

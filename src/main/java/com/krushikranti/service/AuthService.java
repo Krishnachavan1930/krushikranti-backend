@@ -77,6 +77,30 @@ public class AuthService {
     }
 
     @Transactional
+    public String registerAdmin(RegisterRequest request) {
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new DuplicateResourceException("Email is already registered: " + request.getEmail());
+        }
+
+        // Build active admin user directly
+        User user = User.builder()
+                .name(request.getFirstName() + " " + request.getLastName())
+                .firstName(request.getFirstName())
+                .lastName(request.getLastName())
+                .email(request.getEmail())
+                .password(passwordEncoder.encode(request.getPassword()))
+                .phone(request.getPhone())
+                .role(User.Role.ROLE_ADMIN)
+                .isVerified(true) // Admin doesn't need OTP email to start
+                .build();
+
+        User savedUser = userRepository.save(user);
+        log.warn("New ADMIN user registered manually: {} [{}]", savedUser.getEmail(), savedUser.getRole());
+
+        return "Admin registration successful. You can log in immediately.";
+    }
+
+    @Transactional
     public String verifyOtp(OtpVerifyRequest request) {
         User user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> new ResourceNotFoundException("User", "email", request.getEmail()));
@@ -160,12 +184,12 @@ public class AuthService {
     @Transactional
     public String forgotPassword(ForgotPasswordRequest request) {
         log.info("Forgot password request received for email: {}", request.getEmail());
-        
+
         // Validate email
         if (request.getEmail() == null || request.getEmail().trim().isEmpty()) {
             throw new IllegalArgumentException("Email is required");
         }
-        
+
         User user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> new ResourceNotFoundException("User", "email", request.getEmail()));
 
@@ -174,7 +198,7 @@ public class AuthService {
         // Generate OTP for password reset
         String otp = generateOtp();
         log.info("Generated OTP for user {}", user.getEmail());
-        
+
         LocalDateTime otpExpiry = LocalDateTime.now().plusMinutes(OTP_EXPIRY_MINUTES);
 
         user.setOtp(otp);
