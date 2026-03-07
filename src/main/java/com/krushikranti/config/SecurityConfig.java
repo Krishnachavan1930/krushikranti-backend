@@ -19,6 +19,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.config.Customizer;
 
 @Configuration
 @EnableWebSecurity
@@ -40,10 +41,22 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http
+                .cors(Customizer.withDefaults())
                 .csrf(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(PUBLIC_URLS).permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/v1/products/**").permitAll()
+                        // Product endpoints — public GET access
+                        .requestMatchers(HttpMethod.GET, "/api/v1/products").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/products/categories").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/products/{id}").permitAll()
+                        // Product farmer endpoints — require authentication (method-level @PreAuthorize
+                        // handles role)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/products/my-products").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/products/farmer/**").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/products/**").authenticated()
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/products/**").authenticated()
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/products/**").authenticated()
+                        // Blog endpoints — public GET access
                         .requestMatchers(HttpMethod.GET, "/api/blogs/**").permitAll()
                         // Upload endpoints (require authentication)
                         .requestMatchers("/api/upload/**").authenticated()

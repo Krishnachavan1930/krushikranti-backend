@@ -28,16 +28,25 @@ public class Product {
     private String description;
 
     @Column(nullable = false, precision = 10, scale = 2)
-    private BigDecimal price;
+    private BigDecimal retailPrice;
+
+    @Column(precision = 10, scale = 2)
+    private BigDecimal wholesalePrice;
 
     @Column(nullable = false)
-    private Integer stock;
+    private Integer quantity;
 
-    private String unit; // kg, quintal, ton, etc.
+    private String unit; // kg, quintal, ton, piece, dozen, litre, etc.
 
     private String category;
 
     private String imageUrl;
+
+    private String location;
+
+    @Column(nullable = false)
+    @Builder.Default
+    private Boolean organic = false;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

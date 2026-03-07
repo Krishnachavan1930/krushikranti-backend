@@ -13,6 +13,8 @@ import org.springframework.stereotype.Repository;
 public interface ProductRepository extends JpaRepository<Product, Long> {
         Page<Product> findByFarmer(User farmer, Pageable pageable);
 
+        Page<Product> findByFarmerId(Long farmerId, Pageable pageable);
+
         Page<Product> findByCategory(String category, Pageable pageable);
 
         Page<Product> findByStatus(Product.ProductStatus status, Pageable pageable);
