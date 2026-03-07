@@ -60,6 +60,14 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/blogs/**").permitAll()
                         // Upload endpoints (require authentication)
                         .requestMatchers("/api/upload/**").authenticated()
+                        // WebSocket endpoints
+                        .requestMatchers("/ws/**").permitAll()
+                        // Bulk Products — public GET, authenticated write
+                        .requestMatchers(HttpMethod.GET, "/api/v1/bulk-products").permitAll()
+                        .requestMatchers("/api/v1/bulk-products/**").authenticated()
+                        // Negotiations — authenticated access (method-level @PreAuthorize handles
+                        // roles)
+                        .requestMatchers("/api/v1/negotiations/**").authenticated()
                         // Role-Based Access Control paths
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/farmer/**").hasRole("FARMER")

@@ -7,6 +7,7 @@ import com.krushikranti.exception.ResourceNotFoundException;
 import com.krushikranti.model.Product;
 import com.krushikranti.model.User;
 import com.krushikranti.repository.ProductRepository;
+import com.krushikranti.repository.ReviewRepository;
 import com.krushikranti.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,6 +25,7 @@ public class ProductService {
     private final ProductRepository productRepository;
     private final UserRepository userRepository;
     private final CloudinaryService cloudinaryService;
+    private final ReviewRepository reviewRepository;
 
     /**
      * Get all active products with optional category/search filters (public)
@@ -40,7 +42,12 @@ public class ProductService {
     public ProductResponse getProductById(Long id) {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Product", "id", id));
-        return ProductResponse.fromEntity(product);
+        
+        // Get review statistics
+        Double averageRating = reviewRepository.getAverageRatingByProductId(id);
+        Long totalReviews = reviewRepository.countByProductId(id);
+        
+        return ProductResponse.fromEntity(product, averageRating, totalReviews);
     }
 
     /**

@@ -56,6 +56,17 @@ public class AuthController {
                 .body(ApiResponse.success(message, null));
     }
 
+    @PostMapping("/register-admin")
+    @Operation(summary = "Register an Admin (Dev/Bootstrap)", description = "Directly creates an active admin user without OTP for development purposes")
+    public ResponseEntity<ApiResponse<String>> registerAdmin(@Valid @RequestBody RegisterRequest request) {
+        log.warn("Admin registration attempt: email={}", request.getEmail());
+        // Force the role to ADMIN
+        request.setRole("ADMIN");
+        String message = authService.registerAdmin(request);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success(message, null));
+    }
+
     @PostMapping("/verify-otp")
     @Operation(summary = "Verify email with OTP", description = "Verifies user email using the 6-digit OTP sent during registration")
     public ResponseEntity<ApiResponse<String>> verifyOtp(@Valid @RequestBody OtpVerifyRequest request) {
@@ -93,7 +104,8 @@ public class AuthController {
 
     @PostMapping("/verify-reset-otp")
     @Operation(summary = "Verify Reset OTP", description = "Verifies the password reset OTP and returns a reset token")
-    public ResponseEntity<ApiResponse<VerifyResetOtpResponse>> verifyResetOtp(@Valid @RequestBody VerifyResetOtpRequest request) {
+    public ResponseEntity<ApiResponse<VerifyResetOtpResponse>> verifyResetOtp(
+            @Valid @RequestBody VerifyResetOtpRequest request) {
         VerifyResetOtpResponse response = authService.verifyResetOtp(request);
         return ResponseEntity.ok(ApiResponse.success(response.getMessage(), response));
     }

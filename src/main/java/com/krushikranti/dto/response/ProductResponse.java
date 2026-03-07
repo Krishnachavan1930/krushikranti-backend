@@ -31,8 +31,16 @@ public class ProductResponse {
     private String farmerName;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    
+    // Review fields
+    private Double averageRating;
+    private Long totalReviews;
 
     public static ProductResponse fromEntity(Product product) {
+        return fromEntity(product, 0.0, 0L);
+    }
+
+    public static ProductResponse fromEntity(Product product, Double averageRating, Long totalReviews) {
         String farmerName = product.getFarmer().getFirstName();
         if (product.getFarmer().getLastName() != null) {
             farmerName += " " + product.getFarmer().getLastName();
@@ -54,6 +62,8 @@ public class ProductResponse {
                 .farmerName(farmerName)
                 .createdAt(product.getCreatedAt())
                 .updatedAt(product.getUpdatedAt())
+                .averageRating(averageRating != null ? averageRating : 0.0)
+                .totalReviews(totalReviews != null ? totalReviews : 0L)
                 .build();
     }
 }
