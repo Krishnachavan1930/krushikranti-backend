@@ -20,9 +20,16 @@ public class Order {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "order_number", nullable = false, unique = true)
+    private String orderNumber;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "buyer_id", nullable = false)
+    private User buyer;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "product_id", nullable = false)
@@ -31,11 +38,14 @@ public class Order {
     @Column(nullable = false)
     private Integer quantity;
 
-    @Column(nullable = false, precision = 10, scale = 2)
+    @Column(name = "total_amount", nullable = false, precision = 12, scale = 2)
+    private BigDecimal totalAmount;
+
+    @Column(name = "total_price", precision = 10, scale = 2)
     private BigDecimal totalPrice;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column(name = "order_status", nullable = false)
     @Builder.Default
     private OrderStatus status = OrderStatus.PENDING;
 
@@ -66,6 +76,15 @@ public class Order {
     private String shippingState;
     private String shippingPincode;
     private String customerPhone;
+
+    // Delivery Partner
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "delivery_partner_id")
+    private User deliveryPartner;
+
+    private String deliveryPartnerName;
+    private String deliveryPartnerPhone;
+    private String deliveryNotes;
 
     @CreationTimestamp
     @Column(nullable = false, updatable = false)

@@ -69,11 +69,19 @@ public class ProductService {
     @Transactional
     public ProductResponse createProduct(CreateProductRequest request, String farmerEmail,
             MultipartFile imageFile) {
+        log.info("Creating product: name={}, farmer={}", request.getName(), farmerEmail);
+        
         User farmer = userRepository.findByEmail(farmerEmail)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "email", farmerEmail));
 
         // Determine image URL — uploaded file takes priority over pasted URL
-        String imageUrl = resolveImageUrl(imageFile, request.getImageUrl());
+        String imageUrl = null;
+        try {
+            imageUrl = resolveImageUrl(imageFile, request.getImageUrl());
+        } catch (Exception e) {
+            log.error("Failed to process image: {}", e.getMessage(), e);
+            // Continue without image if upload fails
+        }
 
         Product product = Product.builder()
                 .name(request.getName())
@@ -90,9 +98,14 @@ public class ProductService {
                 .farmer(farmer)
                 .build();
 
-        Product saved = productRepository.save(product);
-        log.info("Product created: id={}, name={}, farmer={}", saved.getId(), saved.getName(), farmerEmail);
-        return ProductResponse.fromEntity(saved);
+        try {
+            Product saved = productRepository.save(product);
+            log.info("Product created: id={}, name={}, farmer={}", saved.getId(), saved.getName(), farmerEmail);
+            return ProductResponse.fromEntity(saved);
+        } catch (Exception e) {
+            log.error("Failed to save product: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to create product: " + e.getMessage(), e);
+        }
     }
 
     /**

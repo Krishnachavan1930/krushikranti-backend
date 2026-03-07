@@ -108,23 +108,29 @@ public class ProductController {
             @RequestParam(value = "organic", required = false, defaultValue = "false") Boolean organic,
             @RequestParam(value = "imageFile", required = false) MultipartFile imageFile) {
 
-        CreateProductRequest request = CreateProductRequest.builder()
-                .name(name)
-                .description(description)
-                .retailPrice(retailPrice)
-                .wholesalePrice(wholesalePrice)
-                .quantity(quantity)
-                .unit(unit)
-                .category(category)
-                .imageUrl(imageUrl)
-                .location(location)
-                .organic(organic)
-                .build();
+        try {
+            CreateProductRequest request = CreateProductRequest.builder()
+                    .name(name)
+                    .description(description)
+                    .retailPrice(retailPrice)
+                    .wholesalePrice(wholesalePrice)
+                    .quantity(quantity)
+                    .unit(unit)
+                    .category(category)
+                    .imageUrl(imageUrl)
+                    .location(location)
+                    .organic(organic)
+                    .build();
 
-        String email = authentication.getName();
-        ProductResponse created = productService.createProduct(request, email, imageFile);
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.success("Product created successfully", created));
+            String email = authentication.getName();
+            ProductResponse created = productService.createProduct(request, email, imageFile);
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(ApiResponse.success("Product created successfully", created));
+        } catch (Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.error("Failed to create product: " + e.getMessage()));
+        }
     }
 
     @PostMapping(value = "/json", consumes = MediaType.APPLICATION_JSON_VALUE)

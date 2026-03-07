@@ -33,6 +33,10 @@ public class ProductResponse {
     private LocalDateTime updatedAt;
 
     public static ProductResponse fromEntity(Product product) {
+        String farmerName = product.getFarmer().getFirstName();
+        if (product.getFarmer().getLastName() != null) {
+            farmerName += " " + product.getFarmer().getLastName();
+        }
         return ProductResponse.builder()
                 .id(product.getId())
                 .name(product.getName())
@@ -47,7 +51,7 @@ public class ProductResponse {
                 .organic(product.getOrganic())
                 .status(product.getStatus().name())
                 .farmerId(product.getFarmer().getId())
-                .farmerName(product.getFarmer().getFirstName() + " " + product.getFarmer().getLastName())
+                .farmerName(farmerName)
                 .createdAt(product.getCreatedAt())
                 .updatedAt(product.getUpdatedAt())
                 .build();
