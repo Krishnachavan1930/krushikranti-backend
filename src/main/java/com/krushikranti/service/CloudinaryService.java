@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import com.cloudinary.Transformation;
 
 @Service
 @RequiredArgsConstructor
@@ -21,33 +22,33 @@ public class CloudinaryService {
     private final Cloudinary cloudinary;
 
     private static final List<String> ALLOWED_IMAGE_TYPES = Arrays.asList(
-            "image/jpeg", "image/png", "image/gif", "image/webp"
-    );
-    
+            "image/jpeg", "image/png", "image/gif", "image/webp");
+
     private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
     /**
      * Upload an image to Cloudinary
-     * @param file The image file to upload
-     * @param folder The folder name in Cloudinary (e.g., "products", "avatars", "blogs")
+     * 
+     * @param file   The image file to upload
+     * @param folder The folder name in Cloudinary (e.g., "products", "avatars",
+     *               "blogs")
      * @return The URL of the uploaded image
      */
     public String uploadImage(MultipartFile file, String folder) {
         validateFile(file);
-        
+
         try {
             Map<String, Object> uploadParams = ObjectUtils.asMap(
                     "folder", "krushikranti/" + folder,
                     "resource_type", "image",
-                    "transformation", getTransformation(folder)
-            );
+                    "transformation", getTransformation(folder));
 
             @SuppressWarnings("unchecked")
             Map<String, Object> uploadResult = cloudinary.uploader().upload(file.getBytes(), uploadParams);
-            
+
             String secureUrl = (String) uploadResult.get("secure_url");
             log.info("Image uploaded successfully to Cloudinary: {}", secureUrl);
-            
+
             return secureUrl;
         } catch (IOException e) {
             log.error("Failed to upload image to Cloudinary", e);
@@ -57,6 +58,7 @@ public class CloudinaryService {
 
     /**
      * Delete an image from Cloudinary by its public ID
+     * 
      * @param publicId The public ID of the image to delete
      */
     public void deleteImage(String publicId) {
@@ -76,7 +78,8 @@ public class CloudinaryService {
         if (cloudinaryUrl == null || cloudinaryUrl.isEmpty()) {
             return null;
         }
-        // URL format: https://res.cloudinary.com/{cloud_name}/image/upload/v{version}/{public_id}.{format}
+        // URL format:
+        // https://res.cloudinary.com/{cloud_name}/image/upload/v{version}/{public_id}.{format}
         String[] parts = cloudinaryUrl.split("/upload/");
         if (parts.length < 2) {
             return null;
@@ -107,30 +110,26 @@ public class CloudinaryService {
         }
     }
 
-    private Map<String, Object> getTransformation(String folder) {
+    private Transformation getTransformation(String folder) {
         return switch (folder) {
-            case "avatars" -> ObjectUtils.asMap(
-                    "width", 200,
-                    "height", 200,
-                    "crop", "fill",
-                    "gravity", "face",
-                    "quality", "auto"
-            );
-            case "products" -> ObjectUtils.asMap(
-                    "width", 800,
-                    "height", 800,
-                    "crop", "limit",
-                    "quality", "auto"
-            );
-            case "blogs" -> ObjectUtils.asMap(
-                    "width", 1200,
-                    "height", 630,
-                    "crop", "fill",
-                    "quality", "auto"
-            );
-            default -> ObjectUtils.asMap(
-                    "quality", "auto"
-            );
+            case "avatars" -> new Transformation()
+                    .width(200)
+                    .height(200)
+                    .crop("fill")
+                    .gravity("face")
+                    .fetchFormat("auto");
+            case "products" -> new Transformation()
+                    .width(800)
+                    .height(800)
+                    .crop("limit")
+                    .fetchFormat("auto");
+            case "blogs" -> new Transformation()
+                    .width(1200)
+                    .height(630)
+                    .crop("fill")
+                    .fetchFormat("auto");
+            default -> new Transformation()
+                    .fetchFormat("auto");
         };
     }
 }

@@ -1,6 +1,7 @@
 package com.krushikranti.service;
 
 import com.krushikranti.dto.response.PaymentOrderResponse;
+import com.krushikranti.dto.response.ShipmentResponse;
 import com.krushikranti.exception.ResourceNotFoundException;
 import com.krushikranti.model.Order;
 import com.krushikranti.repository.OrderRepository;
@@ -22,6 +23,8 @@ import java.math.BigDecimal;
 public class PaymentService {
 
     private final OrderRepository orderRepository;
+    private final ShiprocketService shiprocketService;
+    private final NotificationService notificationService;
 
     @Value("${razorpay.key.id}")
     private String razorpayKeyId;
@@ -76,17 +79,39 @@ public class PaymentService {
 
             if (isSignatureValid) {
                 // Find order linked to this razorpay order
-                // Note: We'd normally use a custom jpa query here, but let's assume we can
-                // fetch it like this for brevity
-                Order dbOrder = orderRepository.findAll().stream()
-                        .filter(order -> razorpayOrderId.equals(order.getRazorpayOrderId()))
-                        .findFirst()
+                Order dbOrder = orderRepository.findByRazorpayOrderId(razorpayOrderId)
                         .orElseThrow(() -> new RuntimeException(
                                 "associated order not found for razorpay order: " + razorpayOrderId));
 
-                dbOrder.setStatus(Order.OrderStatus.PAID);
+                dbOrder.setStatus(Order.OrderStatus.CONFIRMED);
                 dbOrder.setRazorpayPaymentId(razorpayPaymentId);
                 orderRepository.save(dbOrder);
+
+                // Send payment notification
+                try {
+                    notificationService.notifyOrderStatusChange(dbOrder, "PENDING", "CONFIRMED");
+                } catch (Exception e) {
+                    log.error("Failed to send payment notification", e);
+                }
+
+                // Automatically create shipment after payment
+                try {
+                    ShipmentResponse shipmentResponse = shiprocketService.createShipment(dbOrder);
+                    if (shipmentResponse.isSuccess()) {
+                        dbOrder.setShipmentId(shipmentResponse.getShipmentId());
+                        dbOrder.setAwbCode(shipmentResponse.getAwbCode());
+                        dbOrder.setCourierName(shipmentResponse.getCourierName());
+                        dbOrder.setDeliveryStatus(Order.DeliveryStatus.PICKUP_SCHEDULED);
+                        dbOrder.setTrackingStatus("Shipment Created");
+                        orderRepository.save(dbOrder);
+                        
+                        log.info("Shipment created for order: {}", dbOrder.getId());
+                    }
+                } catch (Exception e) {
+                    log.error("Failed to create shipment for order: {}", dbOrder.getId(), e);
+                    // Don't fail the payment verification if shipment fails
+                }
+
                 return true;
             } else {
                 return false;
