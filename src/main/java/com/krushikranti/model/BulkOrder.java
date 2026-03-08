@@ -80,6 +80,28 @@ public class BulkOrder {
     @Builder.Default
     private DeliveryStatus deliveryStatus = DeliveryStatus.NOT_SHIPPED;
 
+    // Shipping Address Fields
+    @Column(name = "shipping_name", length = 100)
+    private String shippingName;
+
+    @Column(name = "shipping_phone", length = 20)
+    private String shippingPhone;
+
+    @Column(name = "shipping_address", length = 500)
+    private String shippingAddress;
+
+    @Column(name = "shipping_city", length = 100)
+    private String shippingCity;
+
+    @Column(name = "shipping_state", length = 100)
+    private String shippingState;
+
+    @Column(name = "shipping_pincode", length = 10)
+    private String shippingPincode;
+
+    // Estimated Delivery
+    private LocalDateTime estimatedDelivery;
+
     @CreationTimestamp
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;

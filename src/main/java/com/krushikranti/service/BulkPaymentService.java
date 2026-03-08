@@ -1,7 +1,9 @@
 package com.krushikranti.service;
 
+import com.krushikranti.dto.request.BulkPaymentInitiateRequest;
 import com.krushikranti.dto.response.BulkOrderResponse;
 import com.krushikranti.dto.response.PaymentOrderResponse;
+import com.krushikranti.dto.response.TrackingResponse;
 import com.krushikranti.exception.ResourceNotFoundException;
 import com.krushikranti.model.*;
 import com.krushikranti.repository.BulkOrderRepository;
@@ -19,7 +21,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Service
@@ -41,11 +45,19 @@ public class BulkPaymentService {
     private static final BigDecimal PLATFORM_FEE_PERCENT = new BigDecimal("0.05"); // 5%
     private static final BigDecimal FARMER_PAYOUT_PERCENT = new BigDecimal("0.95"); // 95%
 
+    // Temporary in-memory store: razorpayOrderId → pending payment data.
+    // BulkOrder is only persisted after successful payment verification.
+    private final ConcurrentHashMap<String, PendingPaymentData> pendingPayments = new ConcurrentHashMap<>();
+
+    private record PendingPaymentData(Long dealOfferId, User wholesaler, BulkPaymentInitiateRequest shippingRequest) {}
+
     /**
-     * Create a BulkOrder and Razorpay payment order when a deal is accepted
+     * Create a Razorpay payment order for an accepted deal.
+     * The BulkOrder entity is NOT persisted here — only after payment verification succeeds.
      */
     @Transactional
-    public PaymentOrderResponse initiatePayment(String wholesalerEmail, Long dealOfferId) {
+    public PaymentOrderResponse initiatePayment(String wholesalerEmail, Long dealOfferId,
+            BulkPaymentInitiateRequest shippingRequest) {
         User wholesaler = userRepository.findByEmail(wholesalerEmail)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "email", wholesalerEmail));
 
@@ -61,30 +73,17 @@ public class BulkPaymentService {
             throw new RuntimeException("Only the wholesaler in this deal can initiate payment");
         }
 
-        // Check if order already exists
-        BulkOrder existingOrder = bulkOrderRepository.findByDealOffer(deal).orElse(null);
-        if (existingOrder != null && existingOrder.getPaymentStatus() == BulkOrder.PaymentStatus.PAID) {
-            throw new RuntimeException("Payment already completed for this deal");
-        }
+        // Reject if payment was already completed for this deal
+        bulkOrderRepository.findByDealOffer(deal).ifPresent(existingOrder -> {
+            if (existingOrder.getPaymentStatus() == BulkOrder.PaymentStatus.PAID) {
+                throw new RuntimeException("Payment already completed for this deal");
+            }
+        });
 
         BigDecimal totalAmount = deal.getTotalPrice();
-        BigDecimal platformFee = totalAmount.multiply(PLATFORM_FEE_PERCENT).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal farmerPayout = totalAmount.multiply(FARMER_PAYOUT_PERCENT).setScale(2, RoundingMode.HALF_UP);
-
-        BulkOrder bulkOrder = existingOrder != null ? existingOrder : BulkOrder.builder()
-                .dealOffer(deal)
-                .farmer(conversation.getFarmer())
-                .wholesaler(wholesaler)
-                .bulkProduct(conversation.getBulkProduct())
-                .totalAmount(totalAmount)
-                .platformFee(platformFee)
-                .farmerPayout(farmerPayout)
-                .build();
 
         try {
             RazorpayClient razorpayClient = new RazorpayClient(razorpayKeyId, razorpayKeySecret);
-
-            // Razorpay takes amount in paise
             int amountInPaise = totalAmount.multiply(new BigDecimal("100")).intValue();
 
             JSONObject orderRequest = new JSONObject();
@@ -98,12 +97,13 @@ public class BulkPaymentService {
                     .put("wholesaler_id", wholesaler.getId()));
 
             com.razorpay.Order razorpayOrder = razorpayClient.orders.create(orderRequest);
-
             String razorpayOrderId = razorpayOrder.get("id");
-            bulkOrder.setRazorpayOrderId(razorpayOrderId);
-            bulkOrderRepository.save(bulkOrder);
 
-            log.info("Created Razorpay order {} for bulk deal {}", razorpayOrderId, dealOfferId);
+            // Cache shipping + deal data until payment is verified
+            pendingPayments.put(razorpayOrderId, new PendingPaymentData(dealOfferId, wholesaler, shippingRequest));
+
+            log.info("Created Razorpay order {} for bulk deal {} — BulkOrder will be persisted after verification",
+                    razorpayOrderId, dealOfferId);
 
             return PaymentOrderResponse.builder()
                     .id(razorpayOrderId)
@@ -119,7 +119,8 @@ public class BulkPaymentService {
     }
 
     /**
-     * Verify payment and process fulfillment (split payments + shipping)
+     * Verify Razorpay signature, then (and only then) create and persist the BulkOrder,
+     * and trigger Shiprocket shipment.
      */
     @Transactional
     public BulkOrderResponse verifyAndProcessPayment(String razorpayOrderId, String razorpayPaymentId,
@@ -131,33 +132,63 @@ public class BulkPaymentService {
             options.put("razorpay_signature", razorpaySignature);
 
             boolean isSignatureValid = Utils.verifyPaymentSignature(options, razorpayKeySecret);
-
             if (!isSignatureValid) {
                 throw new RuntimeException("Invalid payment signature");
             }
 
-            BulkOrder bulkOrder = bulkOrderRepository.findByRazorpayOrderId(razorpayOrderId)
-                    .orElseThrow(() -> new RuntimeException("Bulk order not found for razorpay order: " + razorpayOrderId));
+            // Retrieve cached data from initiation
+            PendingPaymentData pendingData = pendingPayments.get(razorpayOrderId);
+            if (pendingData == null) {
+                // Duplicate verify call — BulkOrder may already be created
+                return bulkOrderRepository.findByRazorpayOrderId(razorpayOrderId)
+                        .map(BulkOrderResponse::fromEntity)
+                        .orElseThrow(() -> new RuntimeException(
+                                "No pending payment data found for order: " + razorpayOrderId));
+            }
 
-            bulkOrder.setRazorpayPaymentId(razorpayPaymentId);
-            bulkOrder.setPaymentStatus(BulkOrder.PaymentStatus.PAID);
-            bulkOrder.setOrderStatus(BulkOrder.OrderStatus.CONFIRMED);
+            DealOffer deal = dealOfferRepository.findById(pendingData.dealOfferId())
+                    .orElseThrow(() -> new ResourceNotFoundException("DealOffer", "id", pendingData.dealOfferId()));
 
-            // Log payment split for admin visibility
-            log.info("Bulk payment processed - Total: ₹{}, Platform Fee (5%): ₹{}, Farmer Payout (95%): ₹{}",
-                    bulkOrder.getTotalAmount(), bulkOrder.getPlatformFee(), bulkOrder.getFarmerPayout());
+            Conversation conversation = deal.getConversation();
+            BigDecimal totalAmount = deal.getTotalPrice();
+            BigDecimal platformFee = totalAmount.multiply(PLATFORM_FEE_PERCENT).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal farmerPayout = totalAmount.multiply(FARMER_PAYOUT_PERCENT).setScale(2, RoundingMode.HALF_UP);
 
-            // TODO: Implement actual fund transfer to farmer's account via Razorpay Route/Transfer API
-            // For now, just log and track. In production, use Razorpay Linked Accounts or manual payout.
+            BulkPaymentInitiateRequest shipping = pendingData.shippingRequest();
+
+            // Create BulkOrder only now — after successful payment
+            BulkOrder bulkOrder = BulkOrder.builder()
+                    .dealOffer(deal)
+                    .farmer(conversation.getFarmer())
+                    .wholesaler(pendingData.wholesaler())
+                    .bulkProduct(conversation.getBulkProduct())
+                    .totalAmount(totalAmount)
+                    .platformFee(platformFee)
+                    .farmerPayout(farmerPayout)
+                    .razorpayOrderId(razorpayOrderId)
+                    .razorpayPaymentId(razorpayPaymentId)
+                    .paymentStatus(BulkOrder.PaymentStatus.PAID)
+                    .orderStatus(BulkOrder.OrderStatus.CONFIRMED)
+                    .shippingName(shipping.getFullName())
+                    .shippingPhone(shipping.getPhone())
+                    .shippingAddress(shipping.getAddress())
+                    .shippingCity(shipping.getCity())
+                    .shippingState(shipping.getState())
+                    .shippingPincode(shipping.getPincode())
+                    .build();
 
             bulkOrderRepository.save(bulkOrder);
+            pendingPayments.remove(razorpayOrderId); // Clean up cache
 
-            // Trigger Shiprocket shipment creation
+            log.info("BulkOrder {} created post-payment — Total: ₹{}, Platform Fee: ₹{}, Farmer Payout: ₹{}",
+                    bulkOrder.getId(), bulkOrder.getTotalAmount(), bulkOrder.getPlatformFee(), bulkOrder.getFarmerPayout());
+
+            // Trigger Shiprocket shipment
             try {
                 createBulkShipment(bulkOrder);
             } catch (Exception e) {
                 log.error("Failed to create shipment for bulk order: {}", bulkOrder.getId(), e);
-                // Don't fail payment verification
+                // Do not fail the payment response
             }
 
             return BulkOrderResponse.fromEntity(bulkOrder);
@@ -172,20 +203,38 @@ public class BulkPaymentService {
      * Create Shiprocket shipment for bulk order
      */
     private void createBulkShipment(BulkOrder bulkOrder) {
-        // For bulk B2B orders, we use Shiprocket's B2B shipping
-        // This is a simplified version. In production, you'd need proper address details.
-        
-        String token = shiprocketService.authenticate();
-        
-        // Store tracking info
-        bulkOrder.setDeliveryStatus(BulkOrder.DeliveryStatus.PICKUP_SCHEDULED);
-        bulkOrder.setOrderStatus(BulkOrder.OrderStatus.PROCESSING);
-        
-        // Generate a tracking reference (in production, this comes from Shiprocket API response)
-        bulkOrder.setTrackingUrl("https://shiprocket.co/tracking/" + bulkOrder.getId());
-        
-        bulkOrderRepository.save(bulkOrder);
-        log.info("Bulk shipment scheduled for order: {}", bulkOrder.getId());
+        try {
+            String token = shiprocketService.authenticate();
+            
+            // Create shipment via Shiprocket
+            var shipmentResponse = shiprocketService.createBulkShipment(bulkOrder, token);
+            
+            if (shipmentResponse != null) {
+                bulkOrder.setShipmentId(shipmentResponse.getShipmentId());
+                bulkOrder.setAwbCode(shipmentResponse.getAwbCode());
+                bulkOrder.setCourierName(shipmentResponse.getCourierName());
+                bulkOrder.setTrackingUrl(shipmentResponse.getTrackingUrl());
+                bulkOrder.setDeliveryStatus(BulkOrder.DeliveryStatus.PICKUP_SCHEDULED);
+                bulkOrder.setOrderStatus(BulkOrder.OrderStatus.PROCESSING);
+                
+                // Set estimated delivery (typically 5-7 days for B2B)
+                bulkOrder.setEstimatedDelivery(LocalDateTime.now().plusDays(5));
+            } else {
+                // Fallback if Shiprocket fails
+                bulkOrder.setDeliveryStatus(BulkOrder.DeliveryStatus.PICKUP_SCHEDULED);
+                bulkOrder.setOrderStatus(BulkOrder.OrderStatus.PROCESSING);
+                bulkOrder.setTrackingUrl("https://shiprocket.co/tracking/" + bulkOrder.getId());
+            }
+            
+            bulkOrderRepository.save(bulkOrder);
+            log.info("Bulk shipment scheduled for order: {} with AWB: {}", 
+                    bulkOrder.getId(), bulkOrder.getAwbCode());
+        } catch (Exception e) {
+            log.error("Shiprocket shipment creation failed, setting default status", e);
+            bulkOrder.setDeliveryStatus(BulkOrder.DeliveryStatus.PICKUP_SCHEDULED);
+            bulkOrder.setOrderStatus(BulkOrder.OrderStatus.PROCESSING);
+            bulkOrderRepository.save(bulkOrder);
+        }
     }
 
     /**
@@ -212,16 +261,32 @@ public class BulkPaymentService {
     }
 
     /**
-     * Get a specific bulk order
+     * Get a single bulk order by ID (access-controlled)
      */
     public BulkOrderResponse getOrder(String userEmail, Long orderId) {
+        User user = userRepository.findByEmail(userEmail)
+                .orElseThrow(() -> new ResourceNotFoundException("User", "email", userEmail));
+        BulkOrder order = bulkOrderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("BulkOrder", "id", orderId));
+        boolean hasAccess = user.getRole() == User.Role.ROLE_ADMIN
+                || order.getFarmer().getId().equals(user.getId())
+                || order.getWholesaler().getId().equals(user.getId());
+        if (!hasAccess) {
+            throw new RuntimeException("You do not have access to this order");
+        }
+        return BulkOrderResponse.fromEntity(order);
+    }
+
+    /**
+     * Get tracking info for a bulk order
+     */
+    public TrackingResponse getOrderTracking(String userEmail, Long orderId) {
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "email", userEmail));
 
         BulkOrder order = bulkOrderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("BulkOrder", "id", orderId));
 
-        // Check access
         boolean hasAccess = user.getRole() == User.Role.ROLE_ADMIN
                 || order.getFarmer().getId().equals(user.getId())
                 || order.getWholesaler().getId().equals(user.getId());
@@ -230,6 +295,24 @@ public class BulkPaymentService {
             throw new RuntimeException("You do not have access to this order");
         }
 
-        return BulkOrderResponse.fromEntity(order);
+        if (order.getAwbCode() == null || order.getAwbCode().isBlank()) {
+            TrackingResponse noTrack = new TrackingResponse();
+            noTrack.setSuccess(false);
+            noTrack.setMessage("Shipment not yet dispatched — no AWB code available.");
+            noTrack.setDeliveryStatus(order.getDeliveryStatus().name());
+            noTrack.setOrderStatus(order.getOrderStatus().name());
+            return noTrack;
+        }
+
+        TrackingResponse tracking = shiprocketService.getTrackingInfo(order.getAwbCode());
+        tracking.setOrderId(orderId);
+        tracking.setOrderStatus(order.getOrderStatus().name());
+        tracking.setDeliveryStatus(order.getDeliveryStatus().name());
+        tracking.setCourierName(order.getCourierName());
+        tracking.setDeliveryPartnerName(order.getCourierName());
+        if (tracking.getTrackingUrl() == null) {
+            tracking.setTrackingUrl(order.getTrackingUrl());
+        }
+        return tracking;
     }
 }

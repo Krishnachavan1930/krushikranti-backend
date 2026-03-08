@@ -31,11 +31,23 @@ public class BulkOrderResponse {
     private String orderStatus;
     private String razorpayOrderId;
     private String razorpayPaymentId;
+
+    // Shipping details
+    private String shippingName;
+    private String shippingPhone;
+    private String shippingAddress;
+    private String shippingCity;
+    private String shippingState;
+    private String shippingPincode;
+
+    // Shiprocket details
     private String shipmentId;
     private String awbCode;
     private String courierName;
     private String trackingUrl;
     private String deliveryStatus;
+    private LocalDateTime estimatedDelivery;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -57,11 +69,20 @@ public class BulkOrderResponse {
                 .orderStatus(order.getOrderStatus().name())
                 .razorpayOrderId(order.getRazorpayOrderId())
                 .razorpayPaymentId(order.getRazorpayPaymentId())
+                // Shipping details
+                .shippingName(order.getShippingName())
+                .shippingPhone(order.getShippingPhone())
+                .shippingAddress(order.getShippingAddress())
+                .shippingCity(order.getShippingCity())
+                .shippingState(order.getShippingState())
+                .shippingPincode(order.getShippingPincode())
+                // Shiprocket details
                 .shipmentId(order.getShipmentId())
                 .awbCode(order.getAwbCode())
                 .courierName(order.getCourierName())
                 .trackingUrl(order.getTrackingUrl())
                 .deliveryStatus(order.getDeliveryStatus().name())
+                .estimatedDelivery(order.getEstimatedDelivery())
                 .createdAt(order.getCreatedAt())
                 .updatedAt(order.getUpdatedAt())
                 .build();

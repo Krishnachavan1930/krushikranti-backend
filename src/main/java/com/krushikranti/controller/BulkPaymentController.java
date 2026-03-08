@@ -1,12 +1,15 @@
 package com.krushikranti.controller;
 
+import com.krushikranti.dto.request.BulkPaymentInitiateRequest;
 import com.krushikranti.dto.response.ApiResponse;
 import com.krushikranti.dto.response.BulkOrderResponse;
 import com.krushikranti.dto.response.PaymentOrderResponse;
+import com.krushikranti.dto.response.TrackingResponse;
 import com.krushikranti.service.BulkPaymentService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -27,13 +30,15 @@ public class BulkPaymentController {
     private final BulkPaymentService bulkPaymentService;
 
     @PostMapping("/initiate/{dealOfferId}")
-    @Operation(summary = "Initiate payment for an accepted bulk deal")
+    @Operation(summary = "Initiate payment for an accepted bulk deal with shipping address")
     @PreAuthorize("hasRole('WHOLESALER')")
     public ResponseEntity<ApiResponse<PaymentOrderResponse>> initiatePayment(
             @PathVariable Long dealOfferId,
+            @Valid @RequestBody BulkPaymentInitiateRequest shippingRequest,
             Authentication authentication) {
 
-        PaymentOrderResponse response = bulkPaymentService.initiatePayment(authentication.getName(), dealOfferId);
+        PaymentOrderResponse response = bulkPaymentService.initiatePayment(
+                authentication.getName(), dealOfferId, shippingRequest);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Payment order created successfully", response));
     }
@@ -73,5 +78,16 @@ public class BulkPaymentController {
 
         BulkOrderResponse order = bulkPaymentService.getOrder(authentication.getName(), orderId);
         return ResponseEntity.ok(ApiResponse.success("Bulk order fetched successfully", order));
+    }
+
+    @GetMapping("/orders/{orderId}/track")
+    @Operation(summary = "Get live tracking info for a bulk order")
+    @PreAuthorize("hasAnyRole('FARMER', 'WHOLESALER', 'ADMIN')")
+    public ResponseEntity<ApiResponse<TrackingResponse>> trackOrder(
+            @PathVariable Long orderId,
+            Authentication authentication) {
+
+        TrackingResponse tracking = bulkPaymentService.getOrderTracking(authentication.getName(), orderId);
+        return ResponseEntity.ok(ApiResponse.success("Tracking info fetched", tracking));
     }
 }

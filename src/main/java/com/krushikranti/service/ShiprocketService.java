@@ -303,4 +303,94 @@ public class ShiprocketService {
             return false;
         }
     }
+
+    /**
+     * Create Shiprocket shipment for bulk B2B orders
+     */
+    public ShipmentResponse createBulkShipment(com.krushikranti.model.BulkOrder bulkOrder, String token) {
+        try {
+            WebClient webClient = webClientBuilder.baseUrl(shiprocketBaseUrl).build();
+
+            // Build the shipment request for bulk order
+            Map<String, Object> shipmentRequest = new HashMap<>();
+            shipmentRequest.put("order_id", "BULK-" + bulkOrder.getId());
+            shipmentRequest.put("order_date", bulkOrder.getCreatedAt().toString());
+            shipmentRequest.put("pickup_location", "Primary");
+            shipmentRequest.put("channel_id", "");
+            shipmentRequest.put("comment", "KrushiKranti Bulk Order - B2B");
+            
+            // Billing and shipping details from saved address
+            shipmentRequest.put("billing_customer_name", bulkOrder.getShippingName());
+            shipmentRequest.put("billing_last_name", "");
+            shipmentRequest.put("billing_address", bulkOrder.getShippingAddress());
+            shipmentRequest.put("billing_address_2", "");
+            shipmentRequest.put("billing_city", bulkOrder.getShippingCity());
+            shipmentRequest.put("billing_pincode", bulkOrder.getShippingPincode());
+            shipmentRequest.put("billing_state", bulkOrder.getShippingState());
+            shipmentRequest.put("billing_country", "India");
+            shipmentRequest.put("billing_email", bulkOrder.getWholesaler().getEmail());
+            shipmentRequest.put("billing_phone", bulkOrder.getShippingPhone());
+
+            // Same as billing
+            shipmentRequest.put("shipping_is_billing", true);
+
+            // Order items
+            Map<String, Object> orderItem = new HashMap<>();
+            orderItem.put("name", bulkOrder.getBulkProduct().getName());
+            orderItem.put("sku", "BULK-" + bulkOrder.getBulkProduct().getId());
+            orderItem.put("units", bulkOrder.getDealOffer().getQuantity());
+            orderItem.put("selling_price", bulkOrder.getDealOffer().getPricePerUnit().doubleValue());
+            shipmentRequest.put("order_items", new Map[]{orderItem});
+
+            // Payment details
+            shipmentRequest.put("payment_method", "Prepaid");
+            shipmentRequest.put("sub_total", bulkOrder.getTotalAmount().doubleValue());
+            
+            // Dimensions (for bulk orders, typically larger)
+            shipmentRequest.put("length", 50);
+            shipmentRequest.put("breadth", 50);
+            shipmentRequest.put("height", 50);
+            shipmentRequest.put("weight", 10); // in kg
+
+            Map<String, Object> response = webClient.post()
+                    .uri("/orders/create/adhoc")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(shipmentRequest)
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .block();
+
+            if (response != null) {
+                ShipmentResponse shipmentResponse = new ShipmentResponse();
+                
+                if (response.containsKey("shipment_id")) {
+                    shipmentResponse.setShipmentId(String.valueOf(response.get("shipment_id")));
+                }
+                if (response.containsKey("order_id")) {
+                    shipmentResponse.setShiprocketOrderId(String.valueOf(response.get("order_id")));
+                }
+                if (response.containsKey("awb_code")) {
+                    shipmentResponse.setAwbCode(String.valueOf(response.get("awb_code")));
+                }
+                if (response.containsKey("courier_name")) {
+                    shipmentResponse.setCourierName(String.valueOf(response.get("courier_name")));
+                }
+                
+                // Set tracking URL
+                shipmentResponse.setTrackingUrl("https://shiprocket.co/tracking/" + shipmentResponse.getAwbCode());
+                shipmentResponse.setSuccess(true);
+                shipmentResponse.setMessage("Bulk shipment created successfully");
+                
+                log.info("Successfully created bulk shipment for order: {} with shipment_id: {}", 
+                        bulkOrder.getId(), shipmentResponse.getShipmentId());
+                return shipmentResponse;
+            }
+
+            return null;
+        } catch (Exception e) {
+            log.error("Failed to create bulk shipment for order: {}", bulkOrder.getId(), e);
+            return null;
+        }
+    }
 }
