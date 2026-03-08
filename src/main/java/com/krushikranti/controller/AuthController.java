@@ -10,6 +10,7 @@ import com.krushikranti.dto.request.ResetPasswordRequest;
 import com.krushikranti.dto.response.ApiResponse;
 import com.krushikranti.dto.response.AuthResponse;
 import com.krushikranti.dto.response.VerifyResetOtpResponse;
+import com.krushikranti.model.User;
 import com.krushikranti.service.AuthService;
 import com.krushikranti.service.EmailService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -61,7 +62,7 @@ public class AuthController {
     public ResponseEntity<ApiResponse<String>> registerAdmin(@Valid @RequestBody RegisterRequest request) {
         log.warn("Admin registration attempt: email={}", request.getEmail());
         // Force the role to ADMIN
-        request.setRole("ADMIN");
+        request.setRole(User.Role.ROLE_ADMIN);
         String message = authService.registerAdmin(request);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success(message, null));

@@ -1,6 +1,7 @@
 package com.krushikranti.controller;
 
 import com.krushikranti.dto.request.SendNegotiationMessageRequest;
+import com.krushikranti.dto.request.TypingEvent;
 import com.krushikranti.dto.response.NegotiationMessageResponse;
 import com.krushikranti.service.NegotiationService;
 import lombok.RequiredArgsConstructor;
@@ -8,9 +9,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 
 import java.security.Principal;
+import java.util.Map;
 
 @Controller
 @RequiredArgsConstructor
@@ -18,6 +21,7 @@ import java.security.Principal;
 public class NegotiationWebSocketController {
 
     private final NegotiationService negotiationService;
+    private final SimpMessagingTemplate messagingTemplate;
 
     /**
      * Handles STOMP messages sent to /app/negotiation.send
@@ -40,5 +44,20 @@ public class NegotiationWebSocketController {
         } catch (Exception e) {
             log.error("Error processing WebSocket message: {}", e.getMessage(), e);
         }
+    }
+
+    /**
+     * Handles STOMP messages sent to /app/negotiation.typing
+     * Broadcasts typing status to /topic/typing/{conversationId}
+     */
+    @MessageMapping("/negotiation.typing")
+    public void handleTypingEvent(@Payload TypingEvent event) {
+        if (event.getConversationId() == null || event.getSenderId() == null) {
+            return;
+        }
+        messagingTemplate.convertAndSend(
+                "/topic/typing/" + event.getConversationId(),
+                Map.of("senderId", event.getSenderId(), "isTyping", event.isTyping())
+        );
     }
 }
