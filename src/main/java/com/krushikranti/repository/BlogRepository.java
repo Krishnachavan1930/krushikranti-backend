@@ -10,6 +10,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface BlogRepository extends JpaRepository<Blog, Long> {
@@ -20,6 +21,10 @@ public interface BlogRepository extends JpaRepository<Blog, Long> {
 
     List<Blog> findByAuthorId(Long authorId);
 
+    Optional<Blog> findBySlug(String slug);
+
+    boolean existsBySlug(String slug);
+
     @Query("SELECT b FROM Blog b WHERE " +
             "(:status IS NULL OR b.status = :status) AND " +
             "(:search IS NULL OR LOWER(b.title) LIKE LOWER(CONCAT('%', :search, '%')))")
@@ -28,6 +33,15 @@ public interface BlogRepository extends JpaRepository<Blog, Long> {
             @Param("search") String search,
             Pageable pageable);
 
+    /** Admin query: no status filter, optional search */
+    @Query("SELECT b FROM Blog b WHERE " +
+            "(:search IS NULL OR LOWER(b.title) LIKE LOWER(CONCAT('%', :search, '%')))")
+    Page<Blog> findAllWithSearch(
+            @Param("search") String search,
+            Pageable pageable);
+
     @Query("SELECT b FROM Blog b WHERE b.status = 'PUBLISHED' ORDER BY b.createdAt DESC")
     Page<Blog> findPublishedBlogs(Pageable pageable);
+
+    long countByStatus(Blog.BlogStatus status);
 }

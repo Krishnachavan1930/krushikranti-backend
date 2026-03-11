@@ -43,7 +43,7 @@ public class ShiprocketService {
      */
     public String authenticate() {
         // Check if we have a valid cached token
-        if (cachedToken.get() != null && tokenExpiry.get() != null 
+        if (cachedToken.get() != null && tokenExpiry.get() != null
                 && LocalDateTime.now().isBefore(tokenExpiry.get())) {
             return cachedToken.get();
         }
@@ -96,18 +96,21 @@ public class ShiprocketService {
             shipmentRequest.put("pickup_location", "Primary");
             shipmentRequest.put("channel_id", "");
             shipmentRequest.put("comment", "KrushiKranti Order");
-            
+
             // Billing details
             shipmentRequest.put("billing_customer_name", customer.getFirstName());
             shipmentRequest.put("billing_last_name", customer.getLastName() != null ? customer.getLastName() : "");
-            shipmentRequest.put("billing_address", order.getShippingAddress() != null ? order.getShippingAddress() : "");
+            shipmentRequest.put("billing_address",
+                    order.getShippingAddress() != null ? order.getShippingAddress() : "");
             shipmentRequest.put("billing_address_2", "");
             shipmentRequest.put("billing_city", order.getShippingCity() != null ? order.getShippingCity() : "");
-            shipmentRequest.put("billing_pincode", order.getShippingPincode() != null ? order.getShippingPincode() : "");
+            shipmentRequest.put("billing_pincode",
+                    order.getShippingPincode() != null ? order.getShippingPincode() : "");
             shipmentRequest.put("billing_state", order.getShippingState() != null ? order.getShippingState() : "");
             shipmentRequest.put("billing_country", "India");
             shipmentRequest.put("billing_email", customer.getEmail());
-            shipmentRequest.put("billing_phone", order.getCustomerPhone() != null ? order.getCustomerPhone() : customer.getPhone());
+            shipmentRequest.put("billing_phone",
+                    order.getCustomerPhone() != null ? order.getCustomerPhone() : customer.getPhone());
 
             // Shipping details (same as billing for now)
             shipmentRequest.put("shipping_is_billing", true);
@@ -118,7 +121,7 @@ public class ShiprocketService {
             orderItem.put("sku", "PROD-" + order.getProduct().getId());
             orderItem.put("units", order.getQuantity());
             orderItem.put("selling_price", order.getProduct().getRetailPrice().doubleValue());
-            shipmentRequest.put("order_items", new Map[]{orderItem});
+            shipmentRequest.put("order_items", new Map[] { orderItem });
 
             // Payment details
             shipmentRequest.put("payment_method", "Prepaid");
@@ -139,7 +142,7 @@ public class ShiprocketService {
 
             if (response != null) {
                 ShipmentResponse shipmentResponse = new ShipmentResponse();
-                
+
                 if (response.containsKey("shipment_id")) {
                     shipmentResponse.setShipmentId(String.valueOf(response.get("shipment_id")));
                 }
@@ -154,7 +157,7 @@ public class ShiprocketService {
                 }
                 shipmentResponse.setSuccess(true);
                 shipmentResponse.setMessage("Shipment created successfully");
-                
+
                 log.info("Successfully created shipment for order: {}", order.getId());
                 return shipmentResponse;
             }
@@ -187,15 +190,16 @@ public class ShiprocketService {
 
             if (response != null && response.containsKey("tracking_data")) {
                 Map<String, Object> trackingData = (Map<String, Object>) response.get("tracking_data");
-                
+
                 TrackingResponse trackingResponse = new TrackingResponse();
                 trackingResponse.setAwbCode(awbCode);
                 trackingResponse.setSuccess(true);
-                
+
                 if (trackingData.containsKey("shipment_track")) {
                     Object shipmentTrack = trackingData.get("shipment_track");
                     if (shipmentTrack instanceof java.util.List && !((java.util.List<?>) shipmentTrack).isEmpty()) {
-                        Map<String, Object> latestTrack = (Map<String, Object>) ((java.util.List<?>) shipmentTrack).get(0);
+                        Map<String, Object> latestTrack = (Map<String, Object>) ((java.util.List<?>) shipmentTrack)
+                                .get(0);
                         trackingResponse.setCurrentStatus(String.valueOf(latestTrack.get("current_status")));
                         trackingResponse.setCurrentLocation(String.valueOf(latestTrack.get("current_status_body")));
                         if (latestTrack.containsKey("edd")) {
@@ -203,11 +207,12 @@ public class ShiprocketService {
                         }
                     }
                 }
-                
+
                 if (trackingData.containsKey("shipment_track_activities")) {
-                    trackingResponse.setTrackingActivities((java.util.List<Map<String, Object>>) trackingData.get("shipment_track_activities"));
+                    trackingResponse.setTrackingActivities(
+                            (java.util.List<Map<String, Object>>) trackingData.get("shipment_track_activities"));
                 }
-                
+
                 if (trackingData.containsKey("track_url")) {
                     trackingResponse.setTrackingUrl(String.valueOf(trackingData.get("track_url")));
                 }
@@ -256,7 +261,7 @@ public class ShiprocketService {
             if (response != null && response.containsKey("response")) {
                 Map<String, Object> respData = (Map<String, Object>) response.get("response");
                 Map<String, Object> awbData = (Map<String, Object>) respData.get("data");
-                
+
                 if (awbData != null) {
                     shipmentResponse.setAwbCode(String.valueOf(awbData.get("awb_code")));
                     shipmentResponse.setCourierName(String.valueOf(awbData.get("courier_name")));
@@ -285,7 +290,7 @@ public class ShiprocketService {
             WebClient webClient = webClientBuilder.baseUrl(shiprocketBaseUrl).build();
 
             Map<String, Object> cancelRequest = new HashMap<>();
-            cancelRequest.put("ids", new String[]{shiprocketOrderId});
+            cancelRequest.put("ids", new String[] { shiprocketOrderId });
 
             Map<String, Object> response = webClient.post()
                     .uri("/orders/cancel")
@@ -318,7 +323,7 @@ public class ShiprocketService {
             shipmentRequest.put("pickup_location", "Primary");
             shipmentRequest.put("channel_id", "");
             shipmentRequest.put("comment", "KrushiKranti Bulk Order - B2B");
-            
+
             // Billing and shipping details from saved address
             shipmentRequest.put("billing_customer_name", bulkOrder.getShippingName());
             shipmentRequest.put("billing_last_name", "");
@@ -340,12 +345,12 @@ public class ShiprocketService {
             orderItem.put("sku", "BULK-" + bulkOrder.getBulkProduct().getId());
             orderItem.put("units", bulkOrder.getDealOffer().getQuantity());
             orderItem.put("selling_price", bulkOrder.getDealOffer().getPricePerUnit().doubleValue());
-            shipmentRequest.put("order_items", new Map[]{orderItem});
+            shipmentRequest.put("order_items", new Map[] { orderItem });
 
             // Payment details
             shipmentRequest.put("payment_method", "Prepaid");
             shipmentRequest.put("sub_total", bulkOrder.getTotalAmount().doubleValue());
-            
+
             // Dimensions (for bulk orders, typically larger)
             shipmentRequest.put("length", 50);
             shipmentRequest.put("breadth", 50);
@@ -363,7 +368,7 @@ public class ShiprocketService {
 
             if (response != null) {
                 ShipmentResponse shipmentResponse = new ShipmentResponse();
-                
+
                 if (response.containsKey("shipment_id")) {
                     shipmentResponse.setShipmentId(String.valueOf(response.get("shipment_id")));
                 }
@@ -376,13 +381,13 @@ public class ShiprocketService {
                 if (response.containsKey("courier_name")) {
                     shipmentResponse.setCourierName(String.valueOf(response.get("courier_name")));
                 }
-                
+
                 // Set tracking URL
                 shipmentResponse.setTrackingUrl("https://shiprocket.co/tracking/" + shipmentResponse.getAwbCode());
                 shipmentResponse.setSuccess(true);
                 shipmentResponse.setMessage("Bulk shipment created successfully");
-                
-                log.info("Successfully created bulk shipment for order: {} with shipment_id: {}", 
+
+                log.info("Successfully created bulk shipment for order: {} with shipment_id: {}",
                         bulkOrder.getId(), shipmentResponse.getShipmentId());
                 return shipmentResponse;
             }

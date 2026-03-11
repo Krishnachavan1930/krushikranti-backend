@@ -23,10 +23,24 @@ public class Blog {
     @Column(nullable = false)
     private String title;
 
+    @Column(unique = true)
+    private String slug;
+
+    @Column(columnDefinition = "TEXT")
+    private String excerpt;
+
     @Column(columnDefinition = "TEXT", nullable = false)
     private String content;
 
     private String imageUrl;
+
+    private String category;
+
+    /** Comma-separated tag list e.g. "organic,farming,tips" */
+    private String tags;
+
+    /** Denormalised author name for fast reads without JOIN */
+    private String authorName;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "author_id", nullable = false)
@@ -35,7 +49,12 @@ public class Blog {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     @Builder.Default
-    private BlogStatus status = BlogStatus.PUBLISHED;
+    private BlogStatus status = BlogStatus.DRAFT;
+
+    private String metaTitle;
+
+    @Column(columnDefinition = "TEXT")
+    private String metaDescription;
 
     @CreationTimestamp
     @Column(nullable = false, updatable = false)

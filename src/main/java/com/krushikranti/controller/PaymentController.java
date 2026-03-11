@@ -1,9 +1,10 @@
 package com.krushikranti.controller;
 
-import com.krushikranti.dto.request.PaymentOrderRequest;
+import com.krushikranti.dto.request.CheckoutPaymentInitiateRequest;
 import com.krushikranti.dto.request.PaymentVerifyRequest;
 import com.krushikranti.dto.response.ApiResponse;
 import com.krushikranti.dto.response.PaymentOrderResponse;
+import com.krushikranti.dto.response.PaymentVerificationResponse;
 import com.krushikranti.service.PaymentService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -13,9 +14,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/payment")
@@ -27,11 +27,12 @@ public class PaymentController {
     private final PaymentService paymentService;
 
     @PostMapping("/create-order")
-    @Operation(summary = "Generate a Razorpay payment order for an existing internal order")
+    @Operation(summary = "Generate a Razorpay payment order for checkout without persisting orders yet")
     @PreAuthorize("hasAnyRole('USER', 'FARMER', 'WHOLESALER')")
     public ResponseEntity<ApiResponse<PaymentOrderResponse>> createOrder(
-            @Valid @RequestBody PaymentOrderRequest request) {
-        PaymentOrderResponse response = paymentService.createPaymentOrder(request.getOrderId());
+            @Valid @RequestBody CheckoutPaymentInitiateRequest request,
+            Authentication authentication) {
+        PaymentOrderResponse response = paymentService.createPaymentOrder(authentication.getName(), request);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Razorpay payment order generated", response));
     }
@@ -39,17 +40,14 @@ public class PaymentController {
     @PostMapping("/verify")
     @Operation(summary = "Verify the authenticity of a Razorpay payment signature")
     @PreAuthorize("hasAnyRole('USER', 'FARMER', 'WHOLESALER')")
-    public ResponseEntity<ApiResponse<Boolean>> verifyPayment(@Valid @RequestBody PaymentVerifyRequest request) {
-        boolean verified = paymentService.verifyPaymentSignature(
+    public ResponseEntity<ApiResponse<PaymentVerificationResponse>> verifyPayment(
+            @Valid @RequestBody PaymentVerifyRequest request,
+            Authentication authentication) {
+        PaymentVerificationResponse response = paymentService.verifyPaymentSignature(
+                authentication.getName(),
                 request.getRazorpayOrderId(),
                 request.getRazorpayPaymentId(),
                 request.getRazorpaySignature());
-
-        if (verified) {
-            return ResponseEntity.ok(ApiResponse.success("Payment successful and verified", true));
-        } else {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(ApiResponse.error("Payment verification failed"));
-        }
+        return ResponseEntity.ok(ApiResponse.success("Payment successful and verified", response));
     }
 }
