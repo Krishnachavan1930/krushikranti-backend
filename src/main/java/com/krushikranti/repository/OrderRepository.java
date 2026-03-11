@@ -31,6 +31,8 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     Optional<Order> findByRazorpayOrderId(String razorpayOrderId);
 
+    List<Order> findAllByRazorpayOrderIdOrderByIdAsc(String razorpayOrderId);
+
     @Query("SELECT o FROM Order o WHERE o.awbCode = :awbCode")
     Optional<Order> findByAwbCode(@Param("awbCode") String awbCode);
 

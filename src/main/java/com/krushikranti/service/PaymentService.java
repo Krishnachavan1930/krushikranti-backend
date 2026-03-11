@@ -1,13 +1,20 @@
 package com.krushikranti.service;
 
+import com.krushikranti.dto.request.CheckoutPaymentInitiateRequest;
+import com.krushikranti.dto.request.CheckoutPaymentItemRequest;
 import com.krushikranti.dto.response.PaymentOrderResponse;
+import com.krushikranti.dto.response.PaymentVerificationResponse;
 import com.krushikranti.dto.response.ShipmentResponse;
 import com.krushikranti.exception.ResourceNotFoundException;
 import com.krushikranti.model.Order;
+import com.krushikranti.model.Product;
+import com.krushikranti.model.User;
 import com.krushikranti.repository.OrderRepository;
+import com.krushikranti.repository.ProductRepository;
+import com.krushikranti.repository.UserRepository;
 import com.razorpay.RazorpayClient;
 import com.razorpay.RazorpayException;
-import com.razorpay.Utils;
+import com.krushikranti.util.RazorpayUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.json.JSONObject;
@@ -16,6 +23,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 @RequiredArgsConstructor
@@ -23,6 +34,8 @@ import java.math.BigDecimal;
 public class PaymentService {
 
     private final OrderRepository orderRepository;
+    private final ProductRepository productRepository;
+    private final UserRepository userRepository;
     private final ShiprocketService shiprocketService;
     private final NotificationService notificationService;
 
@@ -32,34 +45,60 @@ public class PaymentService {
     @Value("${razorpay.key.secret}")
     private String razorpayKeySecret;
 
+    @Value("${app.commission.admin-percentage:0.10}")
+    private BigDecimal adminCommissionPercentage;
+
+    @Value("${app.commission.farmer-percentage:0.90}")
+    private BigDecimal farmerAmountPercentage;
+
+    private final ConcurrentHashMap<String, PendingCheckoutData> pendingPayments = new ConcurrentHashMap<>();
+
+    private record PendingCheckoutData(User buyer, CheckoutPaymentInitiateRequest request) {
+    }
+
     @Transactional
-    public PaymentOrderResponse createPaymentOrder(Long internalOrderId) {
-        Order dbOrder = orderRepository.findById(internalOrderId)
-                .orElseThrow(() -> new ResourceNotFoundException("Order", "id", internalOrderId));
+    public PaymentOrderResponse createPaymentOrder(String userEmail, CheckoutPaymentInitiateRequest request) {
+        User buyer = userRepository.findByEmail(userEmail)
+                .orElseThrow(() -> new ResourceNotFoundException("User", "email", userEmail));
+
+        if (request.getItems() == null || request.getItems().isEmpty()) {
+            throw new IllegalArgumentException("At least one checkout item is required");
+        }
+
+        BigDecimal totalAmount = BigDecimal.ZERO;
+        for (CheckoutPaymentItemRequest item : request.getItems()) {
+            Product product = productRepository.findById(item.getProductId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Product", "id", item.getProductId()));
+
+            if (product.getQuantity() < item.getQuantity()) {
+                throw new IllegalArgumentException("Insufficient stock for product: " + product.getName());
+            }
+
+            BigDecimal itemTotal = product.getRetailPrice().multiply(BigDecimal.valueOf(item.getQuantity()));
+            totalAmount = totalAmount.add(itemTotal);
+        }
 
         try {
             RazorpayClient razorpayClient = new RazorpayClient(razorpayKeyId, razorpayKeySecret);
 
-            // Razorpay takes amount in paise
-            int amountInPaise = dbOrder.getTotalPrice().multiply(new BigDecimal("100")).intValue();
+            int amountInPaise = totalAmount.multiply(new BigDecimal("100")).intValue();
 
             JSONObject orderRequest = new JSONObject();
             orderRequest.put("amount", amountInPaise);
             orderRequest.put("currency", "INR");
-            orderRequest.put("receipt", "txn_" + internalOrderId);
+            orderRequest.put("receipt", "txn_" + buyer.getId() + "_" + System.currentTimeMillis());
 
             com.razorpay.Order razorpayOrder = razorpayClient.orders.create(orderRequest);
 
             String razorpayOrderId = razorpayOrder.get("id");
-            dbOrder.setRazorpayOrderId(razorpayOrderId);
-            orderRepository.save(dbOrder);
+            pendingPayments.put(razorpayOrderId, new PendingCheckoutData(buyer, request));
 
-            return PaymentOrderResponse.builder()
-                    .id(razorpayOrderId)
-                    .currency(razorpayOrder.get("currency"))
-                    .amount(razorpayOrder.get("amount"))
-                    .status(razorpayOrder.get("status"))
-                    .build();
+            return new PaymentOrderResponse(
+                    razorpayOrderId,
+                    razorpayOrder.get("currency"),
+                    razorpayOrder.get("amount"),
+                    razorpayOrder.get("status")
+            );
 
         } catch (RazorpayException e) {
             log.error("Failed to create Razorpay order", e);
@@ -68,57 +107,111 @@ public class PaymentService {
     }
 
     @Transactional
-    public boolean verifyPaymentSignature(String razorpayOrderId, String razorpayPaymentId, String razorpaySignature) {
+    public PaymentVerificationResponse verifyPaymentSignature(String userEmail, String razorpayOrderId,
+            String razorpayPaymentId, String razorpaySignature) {
         try {
-            JSONObject options = new JSONObject();
-            options.put("razorpay_order_id", razorpayOrderId);
-            options.put("razorpay_payment_id", razorpayPaymentId);
-            options.put("razorpay_signature", razorpaySignature);
+            boolean isSignatureValid = RazorpayUtils.verifySignature(
+                    razorpayOrderId,
+                    razorpayPaymentId,
+                    razorpaySignature,
+                    razorpayKeySecret);
 
-            boolean isSignatureValid = Utils.verifyPaymentSignature(options, razorpayKeySecret);
+            if (!isSignatureValid) {
+                throw new IllegalArgumentException("Payment verification failed");
+            }
 
-            if (isSignatureValid) {
-                // Find order linked to this razorpay order
-                Order dbOrder = orderRepository.findByRazorpayOrderId(razorpayOrderId)
-                        .orElseThrow(() -> new RuntimeException(
-                                "associated order not found for razorpay order: " + razorpayOrderId));
+            List<Order> existingOrders = orderRepository.findAllByRazorpayOrderIdOrderByIdAsc(razorpayOrderId);
+            if (!existingOrders.isEmpty()) {
+                return PaymentVerificationResponse.builder()
+                        .verified(true)
+                        .primaryOrderId(existingOrders.get(0).getId())
+                        .orderIds(existingOrders.stream().map(Order::getId).toList())
+                        .build();
+            }
 
-                dbOrder.setStatus(Order.OrderStatus.CONFIRMED);
-                dbOrder.setRazorpayPaymentId(razorpayPaymentId);
-                orderRepository.save(dbOrder);
+            PendingCheckoutData pendingData = pendingPayments.get(razorpayOrderId);
+            if (pendingData == null) {
+                throw new IllegalArgumentException("No pending checkout found for the provided Razorpay order");
+            }
 
-                // Send payment notification
-                try {
-                    notificationService.notifyOrderStatusChange(dbOrder, "PENDING", "CONFIRMED");
-                } catch (Exception e) {
-                    log.error("Failed to send payment notification", e);
+            if (!pendingData.buyer().getEmail().equals(userEmail)) {
+                throw new IllegalArgumentException("You do not have access to verify this payment");
+            }
+
+            List<Order> createdOrders = new ArrayList<>();
+            for (CheckoutPaymentItemRequest item : pendingData.request().getItems()) {
+                Product product = productRepository.findById(item.getProductId())
+                        .orElseThrow(() -> new ResourceNotFoundException("Product", "id", item.getProductId()));
+
+                if (product.getQuantity() < item.getQuantity()) {
+                    throw new IllegalArgumentException("Insufficient stock for product: " + product.getName());
                 }
 
-                // Automatically create shipment after payment
+                BigDecimal totalPrice = product.getRetailPrice().multiply(BigDecimal.valueOf(item.getQuantity()));
+                BigDecimal adminCommission = totalPrice.multiply(adminCommissionPercentage)
+                        .setScale(2, RoundingMode.HALF_UP);
+                BigDecimal farmerAmount = totalPrice.multiply(farmerAmountPercentage)
+                        .setScale(2, RoundingMode.HALF_UP);
+
+                Order order = Order.builder()
+                        .orderNumber("KK-" + java.util.UUID.randomUUID().toString().substring(0, 8).toUpperCase())
+                        .user(pendingData.buyer())
+                        .buyer(pendingData.buyer())
+                        .product(product)
+                        .quantity(item.getQuantity())
+                        .totalAmount(totalPrice)
+                        .totalPrice(totalPrice)
+                        .status(Order.OrderStatus.CONFIRMED)
+                        .adminCommission(adminCommission)
+                        .farmerAmount(farmerAmount)
+                        .deliveryStatus(Order.DeliveryStatus.PENDING)
+                        .shippingAddress(pendingData.request().getShippingAddress())
+                        .shippingCity(pendingData.request().getShippingCity())
+                        .shippingState(pendingData.request().getShippingState())
+                        .shippingPincode(pendingData.request().getShippingPincode())
+                        .customerPhone(pendingData.request().getCustomerPhone())
+                        .razorpayOrderId(razorpayOrderId)
+                        .razorpayPaymentId(razorpayPaymentId)
+                        .build();
+
+                product.setQuantity(product.getQuantity() - item.getQuantity());
+                productRepository.save(product);
+
+                Order savedOrder = orderRepository.save(order);
+                createdOrders.add(savedOrder);
+
                 try {
-                    ShipmentResponse shipmentResponse = shiprocketService.createShipment(dbOrder);
+                    notificationService.notifyNewOrder(savedOrder);
+                    notificationService.notifyOrderStatusChange(savedOrder, "PENDING", "CONFIRMED");
+                } catch (Exception e) {
+                    log.error("Failed to send payment notification for order: {}", savedOrder.getId(), e);
+                }
+
+                try {
+                    ShipmentResponse shipmentResponse = shiprocketService.createShipment(savedOrder);
                     if (shipmentResponse.isSuccess()) {
-                        dbOrder.setShipmentId(shipmentResponse.getShipmentId());
-                        dbOrder.setAwbCode(shipmentResponse.getAwbCode());
-                        dbOrder.setCourierName(shipmentResponse.getCourierName());
-                        dbOrder.setDeliveryStatus(Order.DeliveryStatus.PICKUP_SCHEDULED);
-                        dbOrder.setTrackingStatus("Shipment Created");
-                        orderRepository.save(dbOrder);
-                        
-                        log.info("Shipment created for order: {}", dbOrder.getId());
+                        savedOrder.setShipmentId(shipmentResponse.getShipmentId());
+                        savedOrder.setAwbCode(shipmentResponse.getAwbCode());
+                        savedOrder.setCourierName(shipmentResponse.getCourierName());
+                        savedOrder.setDeliveryStatus(Order.DeliveryStatus.PICKUP_SCHEDULED);
+                        savedOrder.setTrackingStatus("Shipment Created");
+                        orderRepository.save(savedOrder);
                     }
                 } catch (Exception e) {
-                    log.error("Failed to create shipment for order: {}", dbOrder.getId(), e);
-                    // Don't fail the payment verification if shipment fails
+                    log.error("Failed to create shipment for order: {}", savedOrder.getId(), e);
                 }
-
-                return true;
-            } else {
-                return false;
             }
+
+            pendingPayments.remove(razorpayOrderId);
+
+            return PaymentVerificationResponse.builder()
+                    .verified(true)
+                    .primaryOrderId(createdOrders.get(0).getId())
+                    .orderIds(createdOrders.stream().map(Order::getId).toList())
+                    .build();
         } catch (RazorpayException e) {
             log.error("Exception checking signature", e);
-            return false;
+            throw new RuntimeException("Payment verification failed", e);
         }
     }
 }

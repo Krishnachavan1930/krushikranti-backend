@@ -5,6 +5,7 @@ import com.krushikranti.dto.request.OtpVerifyRequest;
 import com.krushikranti.dto.request.RegisterRequest;
 import com.krushikranti.dto.request.ResendOtpRequest;
 import com.krushikranti.dto.request.ForgotPasswordRequest;
+import com.krushikranti.dto.request.CreateAdminRequest;
 import com.krushikranti.dto.request.VerifyResetOtpRequest;
 import com.krushikranti.dto.request.ResetPasswordRequest;
 import com.krushikranti.dto.response.AuthResponse;
@@ -98,6 +99,32 @@ public class AuthService {
         log.warn("New ADMIN user registered manually: {} [{}]", savedUser.getEmail(), savedUser.getRole());
 
         return "Admin registration successful. You can log in immediately.";
+    }
+
+    @Transactional
+    public String createAdmin(CreateAdminRequest request) {
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new DuplicateResourceException("Email is already registered: " + request.getEmail());
+        }
+
+        String trimmedName = request.getName().trim();
+        String[] nameParts = trimmedName.split("\\s+", 2);
+        String firstName = nameParts[0];
+        String lastName = nameParts.length > 1 ? nameParts[1] : nameParts[0];
+
+        User user = User.builder()
+                .name(trimmedName)
+                .firstName(firstName)
+                .lastName(lastName)
+                .email(request.getEmail())
+                .password(passwordEncoder.encode(request.getPassword()))
+                .role(User.Role.ROLE_ADMIN)
+                .isVerified(true)
+                .build();
+
+        userRepository.save(user);
+        log.warn("New ADMIN user created via create-admin endpoint: {}", user.getEmail());
+        return "Admin created successfully";
     }
 
     @Transactional

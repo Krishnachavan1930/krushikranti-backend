@@ -5,9 +5,13 @@ import com.krushikranti.dto.response.UserResponse;
 import com.krushikranti.exception.ResourceNotFoundException;
 import com.krushikranti.model.User;
 import com.krushikranti.repository.UserRepository;
+import com.krushikranti.service.AdminLogService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Size;
+import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -26,6 +30,19 @@ import org.springframework.web.bind.annotation.*;
 public class UserController {
 
     private final UserRepository userRepository;
+    private final AdminLogService adminLogService;
+
+    @Data
+    static class UpdateProfileRequest {
+        @Size(min = 2, max = 100)
+        private String name;
+        @Size(min = 2, max = 100)
+        private String firstName;
+        @Size(min = 2, max = 100)
+        private String lastName;
+        @Size(min = 10, max = 15)
+        private String phone;
+    }
 
     @GetMapping("/me")
     @Operation(summary = "Get current user profile")
@@ -33,6 +50,21 @@ public class UserController {
         User user = userRepository.findByEmail(userDetails.getUsername())
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
         return ResponseEntity.ok(ApiResponse.success("Profile fetched successfully", UserResponse.fromEntity(user)));
+    }
+
+    @PutMapping("/me")
+    @Operation(summary = "Update current user profile")
+    public ResponseEntity<ApiResponse<UserResponse>> updateCurrentUser(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @Valid @RequestBody UpdateProfileRequest req) {
+        User user = userRepository.findByEmail(userDetails.getUsername())
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        if (req.getName() != null && !req.getName().isBlank()) user.setName(req.getName());
+        if (req.getFirstName() != null && !req.getFirstName().isBlank()) user.setFirstName(req.getFirstName());
+        if (req.getLastName() != null && !req.getLastName().isBlank()) user.setLastName(req.getLastName());
+        if (req.getPhone() != null) user.setPhone(req.getPhone());
+        userRepository.save(user);
+        return ResponseEntity.ok(ApiResponse.success("Profile updated successfully", UserResponse.fromEntity(user)));
     }
 
     @GetMapping
@@ -54,7 +86,9 @@ public class UserController {
     @PutMapping("/{id}/ban")
     @Operation(summary = "Ban a user (Admin only)")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse<UserResponse>> banUser(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<UserResponse>> banUser(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetails userDetails) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", id));
         
@@ -66,24 +100,48 @@ public class UserController {
         
         user.setEnabled(false);
         userRepository.save(user);
+
+        User admin = userRepository.findByEmail(userDetails.getUsername()).orElse(null);
+        adminLogService.log(
+                admin != null ? admin.getId() : 0L,
+                admin != null ? admin.getName() : userDetails.getUsername(),
+                "Banned User",
+                user.getName() + " (" + user.getEmail() + ")",
+                "user"
+        );
+
         return ResponseEntity.ok(ApiResponse.success("User banned successfully", UserResponse.fromEntity(user)));
     }
 
     @PutMapping("/{id}/unban")
     @Operation(summary = "Unban a user (Admin only)")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse<UserResponse>> unbanUser(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<UserResponse>> unbanUser(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetails userDetails) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", id));
         user.setEnabled(true);
         userRepository.save(user);
+
+        User admin = userRepository.findByEmail(userDetails.getUsername()).orElse(null);
+        adminLogService.log(
+                admin != null ? admin.getId() : 0L,
+                admin != null ? admin.getName() : userDetails.getUsername(),
+                "Unbanned User",
+                user.getName() + " (" + user.getEmail() + ")",
+                "user"
+        );
+
         return ResponseEntity.ok(ApiResponse.success("User unbanned successfully", UserResponse.fromEntity(user)));
     }
 
     @DeleteMapping("/{id}")
     @Operation(summary = "Delete a user (Admin only)")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse<Void>> deleteUser(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<Void>> deleteUser(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetails userDetails) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", id));
         
@@ -92,8 +150,20 @@ public class UserController {
             return ResponseEntity.badRequest()
                     .body(ApiResponse.error("Cannot delete admin users"));
         }
-        
+
+        String userName = user.getName();
+        String userEmail = user.getEmail();
         userRepository.delete(user);
+
+        User admin = userRepository.findByEmail(userDetails.getUsername()).orElse(null);
+        adminLogService.log(
+                admin != null ? admin.getId() : 0L,
+                admin != null ? admin.getName() : userDetails.getUsername(),
+                "Deleted User",
+                userName + " (" + userEmail + ")",
+                "user"
+        );
+
         return ResponseEntity.ok(ApiResponse.success("User deleted successfully", null));
     }
 }

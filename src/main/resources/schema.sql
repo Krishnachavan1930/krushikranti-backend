@@ -208,22 +208,26 @@ CREATE INDEX idx_chat_conversation ON chat_messages(sender_id, receiver_id);
 -- STEP 13: CREATE BLOGS TABLE
 -- =========================================
 CREATE TABLE IF NOT EXISTS blogs (
-    id BIGSERIAL PRIMARY KEY,
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
-    slug VARCHAR(255) NOT NULL UNIQUE,
-    content TEXT NOT NULL,
+    slug VARCHAR(255) UNIQUE,
     excerpt TEXT,
+    content TEXT NOT NULL,
     image_url VARCHAR(500),
+    category VARCHAR(100),
+    tags VARCHAR(500),
+    author_name VARCHAR(255),
     author_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    is_published BOOLEAN NOT NULL DEFAULT FALSE,
-    published_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    status VARCHAR(30) NOT NULL DEFAULT 'DRAFT',
+    meta_title VARCHAR(255),
+    meta_description TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_blogs_author ON blogs(author_id);
-CREATE INDEX idx_blogs_slug ON blogs(slug);
-CREATE INDEX idx_blogs_published ON blogs(is_published);
+CREATE INDEX IF NOT EXISTS idx_blogs_author ON blogs(author_id);
+CREATE INDEX IF NOT EXISTS idx_blogs_slug ON blogs(slug);
+CREATE INDEX IF NOT EXISTS idx_blogs_status ON blogs(status);
 
 -- =========================================
 -- STEP 14: CREATE NOTIFICATIONS TABLE

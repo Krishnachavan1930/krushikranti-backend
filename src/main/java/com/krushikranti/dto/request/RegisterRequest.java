@@ -29,9 +29,4 @@ public class RegisterRequest {
 
     @NotNull(message = "Role is required")
     private User.Role role;
-
-    @AssertFalse(message = "Admin registration is not allowed through this endpoint")
-    private boolean isAdmin() {
-        return role == User.Role.ROLE_ADMIN;
-    }
 }

@@ -1,7 +1,8 @@
 package com.krushikranti.controller;
 
+import com.krushikranti.dto.request.BlogRequest;
 import com.krushikranti.dto.response.ApiResponse;
-import com.krushikranti.model.Blog;
+import com.krushikranti.dto.response.BlogResponse;
 import com.krushikranti.service.BlogService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -16,96 +17,128 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
+
 @RestController
 @RequestMapping("/api/blogs")
 @RequiredArgsConstructor
-@Tag(name = "Blogs", description = "Endpoints for managing blog posts")
+@Tag(name = "Blogs", description = "Blog post management endpoints")
 public class BlogController {
 
     private final BlogService blogService;
 
+    // ──────────────────────────────────────────────────────────────────
+    // PUBLIC endpoints (no auth required — SecurityConfig permits GET /api/blogs/**)
+    // ──────────────────────────────────────────────────────────────────
+
     @GetMapping
-    @Operation(summary = "Get all published blogs", description = "Returns paginated list of published blogs")
-    public ResponseEntity<ApiResponse<Page<Blog>>> getAllBlogs(
+    @Operation(summary = "Get published blogs (public)")
+    public ResponseEntity<ApiResponse<Page<BlogResponse>>> getPublishedBlogs(
             @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(defaultValue = "createdAt") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDir) {
 
-        Sort sort = sortDir.equalsIgnoreCase("asc")
-                ? Sort.by(sortBy).ascending()
-                : Sort.by(sortBy).descending();
+        Sort sort = sortDir.equalsIgnoreCase("asc") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
         Pageable pageable = PageRequest.of(page, size, sort);
-        Page<Blog> blogs = blogService.getAllBlogs(search, pageable);
-        return ResponseEntity.ok(ApiResponse.success("Blogs fetched successfully", blogs));
+        return ResponseEntity.ok(ApiResponse.success("Blogs fetched", blogService.getPublishedBlogs(search, pageable)));
     }
 
-    @GetMapping("/{id}")
-    @Operation(summary = "Get blog by ID")
-    public ResponseEntity<ApiResponse<Blog>> getBlogById(@PathVariable Long id) {
-        Blog blog = blogService.getBlogById(id);
-        return ResponseEntity.ok(ApiResponse.success("Blog fetched successfully", blog));
-    }
+    // ──────────────────────────────────────────────────────────────────
+    // ADMIN endpoints (all statuses)
+    // ──────────────────────────────────────────────────────────────────
 
-    @GetMapping("/author/{authorId}")
-    @Operation(summary = "Get blogs by author")
-    public ResponseEntity<ApiResponse<Page<Blog>>> getBlogsByAuthor(
-            @PathVariable Long authorId,
+    @GetMapping("/admin/all")
+    @Operation(summary = "Get all blogs for admin (any status)")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<Page<BlogResponse>>> getAllBlogsAdmin(
+            @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
-        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-        Page<Blog> blogs = blogService.getBlogsByAuthor(authorId, pageable);
-        return ResponseEntity.ok(ApiResponse.success("Author blogs fetched successfully", blogs));
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "desc") String sortDir) {
+
+        Sort sort = sortDir.equalsIgnoreCase("asc") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
+        Pageable pageable = PageRequest.of(page, size, sort);
+        return ResponseEntity.ok(ApiResponse.success("All blogs fetched", blogService.getAllBlogsAdmin(search, pageable)));
+    }
+
+    @GetMapping("/admin/stats")
+    @Operation(summary = "Get blog stats (total / published / draft / archived)")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<Map<String, Long>>> getBlogStats() {
+        return ResponseEntity.ok(ApiResponse.success("Blog stats fetched", blogService.getBlogStats()));
+    }
+
+    @GetMapping("/admin/{id}")
+    @Operation(summary = "Get blog by ID (admin use)")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<BlogResponse>> getBlogById(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success("Blog fetched", blogService.getBlogById(id)));
     }
 
     @PostMapping
-    @Operation(summary = "Create a blog post")
+    @Operation(summary = "Create blog post")
     @SecurityRequirement(name = "bearerAuth")
-    @PreAuthorize("hasAnyRole('FARMER', 'ADMIN')")
-    public ResponseEntity<ApiResponse<Blog>> createBlog(
-            @RequestBody Blog blog,
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<BlogResponse>> createBlog(
+            @RequestBody BlogRequest req,
             @RequestParam Long authorId) {
-        Blog created = blogService.createBlog(blog, authorId);
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.success("Blog created successfully", created));
+        BlogResponse created = blogService.createBlog(req, authorId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success("Blog created", created));
     }
 
     @PutMapping("/{id}")
-    @Operation(summary = "Update a blog post")
+    @Operation(summary = "Update blog post")
     @SecurityRequirement(name = "bearerAuth")
-    @PreAuthorize("hasAnyRole('FARMER', 'ADMIN')")
-    public ResponseEntity<ApiResponse<Blog>> updateBlog(
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<BlogResponse>> updateBlog(
             @PathVariable Long id,
-            @RequestBody Blog blog) {
-        Blog updated = blogService.updateBlog(id, blog);
-        return ResponseEntity.ok(ApiResponse.success("Blog updated successfully", updated));
+            @RequestBody BlogRequest req) {
+        return ResponseEntity.ok(ApiResponse.success("Blog updated", blogService.updateBlog(id, req)));
     }
 
     @DeleteMapping("/{id}")
-    @Operation(summary = "Delete a blog post")
+    @Operation(summary = "Delete blog post")
     @SecurityRequirement(name = "bearerAuth")
-    @PreAuthorize("hasAnyRole('FARMER', 'ADMIN')")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<Void>> deleteBlog(@PathVariable Long id) {
         blogService.deleteBlog(id);
-        return ResponseEntity.ok(ApiResponse.success("Blog deleted successfully", null));
+        return ResponseEntity.ok(ApiResponse.success("Blog deleted", null));
     }
 
     @PatchMapping("/{id}/publish")
-    @Operation(summary = "Publish a blog post")
+    @Operation(summary = "Publish blog post")
     @SecurityRequirement(name = "bearerAuth")
-    @PreAuthorize("hasAnyRole('FARMER', 'ADMIN')")
-    public ResponseEntity<ApiResponse<Blog>> publishBlog(@PathVariable Long id) {
-        Blog published = blogService.publishBlog(id);
-        return ResponseEntity.ok(ApiResponse.success("Blog published successfully", published));
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<BlogResponse>> publishBlog(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success("Blog published", blogService.publishBlog(id)));
+    }
+
+    @PatchMapping("/{id}/unpublish")
+    @Operation(summary = "Unpublish blog post (revert to DRAFT)")
+    @SecurityRequirement(name = "bearerAuth")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<BlogResponse>> unpublishBlog(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success("Blog unpublished", blogService.unpublishBlog(id)));
     }
 
     @PatchMapping("/{id}/archive")
-    @Operation(summary = "Archive a blog post")
+    @Operation(summary = "Archive blog post")
     @SecurityRequirement(name = "bearerAuth")
-    @PreAuthorize("hasAnyRole('FARMER', 'ADMIN')")
-    public ResponseEntity<ApiResponse<Blog>> archiveBlog(@PathVariable Long id) {
-        Blog archived = blogService.archiveBlog(id);
-        return ResponseEntity.ok(ApiResponse.success("Blog archived successfully", archived));
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<BlogResponse>> archiveBlog(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success("Blog archived", blogService.archiveBlog(id)));
+    }
+
+    @GetMapping("/{slug}")
+    @Operation(summary = "Get published blog by slug (public)")
+    public ResponseEntity<ApiResponse<BlogResponse>> getBlogBySlug(@PathVariable String slug) {
+        return ResponseEntity.ok(ApiResponse.success("Blog fetched", blogService.getBlogBySlug(slug)));
     }
 }
+

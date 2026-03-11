@@ -5,6 +5,7 @@ import com.krushikranti.dto.request.OtpVerifyRequest;
 import com.krushikranti.dto.request.RegisterRequest;
 import com.krushikranti.dto.request.ResendOtpRequest;
 import com.krushikranti.dto.request.ForgotPasswordRequest;
+import com.krushikranti.dto.request.CreateAdminRequest;
 import com.krushikranti.dto.request.VerifyResetOtpRequest;
 import com.krushikranti.dto.request.ResetPasswordRequest;
 import com.krushikranti.dto.response.ApiResponse;
@@ -23,7 +24,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/api/v1/auth")
+@RequestMapping({ "/api/v1/auth", "/api/auth" })
 @RequiredArgsConstructor
 @Slf4j
 @Tag(name = "Authentication", description = "Endpoints for user registration, login, and email verification")
@@ -64,6 +65,14 @@ public class AuthController {
         // Force the role to ADMIN
         request.setRole(User.Role.ROLE_ADMIN);
         String message = authService.registerAdmin(request);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success(message, null));
+    }
+
+    @PostMapping("/create-admin")
+    @Operation(summary = "Create an admin user", description = "Creates an active admin user with encoded password and duplicate-email protection")
+    public ResponseEntity<ApiResponse<String>> createAdmin(@Valid @RequestBody CreateAdminRequest request) {
+        String message = authService.createAdmin(request);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success(message, null));
     }
