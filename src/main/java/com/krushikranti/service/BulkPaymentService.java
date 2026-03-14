@@ -35,6 +35,7 @@ public class BulkPaymentService {
     private final DealOfferRepository dealOfferRepository;
     private final UserRepository userRepository;
     private final ShiprocketService shiprocketService;
+    private final InvoiceService invoiceService;
 
     @Value("${razorpay.key.id}")
     private String razorpayKeyId;
@@ -191,6 +192,12 @@ public class BulkPaymentService {
             } catch (Exception e) {
                 log.error("Failed to create shipment for bulk order: {}", bulkOrder.getId(), e);
                 // Do not fail the payment response
+            }
+
+            try {
+                invoiceService.generateInvoiceForBulkOrder(bulkOrder.getId());
+            } catch (Exception e) {
+                log.error("Failed to generate invoice for bulk order: {}", bulkOrder.getId(), e);
             }
 
             return BulkOrderResponse.fromEntity(bulkOrder);

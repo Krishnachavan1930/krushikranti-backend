@@ -262,3 +262,7 @@ ON CONFLICT (name) DO NOTHING;
 -- =========================================
 -- SCHEMA COMPLETE
 -- =========================================
+
+-- Optional migration for invoice support (run once manually if tables already exist)
+ALTER TABLE orders ADD COLUMN invoice_path VARCHAR(500);
+ALTER TABLE bulk_orders ADD COLUMN invoice_path VARCHAR(500);

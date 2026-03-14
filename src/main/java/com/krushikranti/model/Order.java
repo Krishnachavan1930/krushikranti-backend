@@ -52,6 +52,9 @@ public class Order {
     private String razorpayOrderId;
     private String razorpayPaymentId;
 
+    @Column(name = "invoice_path", length = 500)
+    private String invoicePath;
+
     // Shiprocket Integration Fields
     private String shipmentId;
     private String awbCode;

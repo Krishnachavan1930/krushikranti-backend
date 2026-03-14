@@ -52,6 +52,9 @@ public class BulkOrder {
     @Column(name = "razorpay_payment_id", length = 100)
     private String razorpayPaymentId;
 
+    @Column(name = "invoice_path", length = 500)
+    private String invoicePath;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "payment_status", nullable = false, length = 30)
     @Builder.Default

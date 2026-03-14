@@ -38,6 +38,7 @@ public class PaymentService {
     private final UserRepository userRepository;
     private final ShiprocketService shiprocketService;
     private final NotificationService notificationService;
+    private final InvoiceService invoiceService;
 
     @Value("${razorpay.key.id}")
     private String razorpayKeyId;
@@ -199,6 +200,12 @@ public class PaymentService {
                     }
                 } catch (Exception e) {
                     log.error("Failed to create shipment for order: {}", savedOrder.getId(), e);
+                }
+
+                try {
+                    invoiceService.generateInvoiceForOrder(savedOrder.getId());
+                } catch (Exception e) {
+                    log.error("Failed to generate invoice for order: {}", savedOrder.getId(), e);
                 }
             }
 

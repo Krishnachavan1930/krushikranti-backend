@@ -9,6 +9,7 @@ import com.krushikranti.dto.response.OrderResponse;
 import com.krushikranti.dto.response.TrackingResponse;
 import com.krushikranti.model.Order;
 import com.krushikranti.service.OrderService;
+import com.krushikranti.service.InvoiceService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -16,7 +17,10 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.core.io.Resource;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -31,6 +35,7 @@ import java.util.List;
 public class OrderController {
 
     private final OrderService orderService;
+    private final InvoiceService invoiceService;
 
     @PostMapping
     @Operation(summary = "Place a new order")
@@ -98,6 +103,19 @@ public class OrderController {
     public ResponseEntity<ApiResponse<TrackingResponse>> getOrderTracking(@PathVariable Long orderId) {
         TrackingResponse tracking = orderService.getOrderTracking(orderId);
         return ResponseEntity.ok(ApiResponse.success("Tracking information fetched successfully", tracking));
+    }
+
+    @GetMapping("/{orderId}/invoice")
+    @Operation(summary = "Download invoice PDF for an order (legacy path)")
+    @PreAuthorize("hasAnyRole('USER', 'FARMER', 'WHOLESALER', 'ADMIN')")
+    public ResponseEntity<Resource> downloadInvoice(
+            @PathVariable Long orderId,
+            Authentication authentication) {
+        Resource resource = invoiceService.getInvoiceResourceForUser(orderId, authentication.getName());
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=invoice-" + orderId + ".pdf")
+                .body(resource);
     }
 
     @GetMapping("/track/{orderNumber}")

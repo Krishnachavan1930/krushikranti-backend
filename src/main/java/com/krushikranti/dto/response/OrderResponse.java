@@ -43,6 +43,8 @@ public class OrderResponse {
         // Farmer details
         private Long farmerId;
         private String farmerName;
+        private String farmLocation;
+                private String invoiceUrl; // Expose invoice URL/path in OrderResponse DTO
 
         // Shipping address
         private String shippingAddress;
@@ -85,6 +87,7 @@ public class OrderResponse {
                                 // Commission
                                 .adminCommission(order.getAdminCommission())
                                 .farmerAmount(order.getFarmerAmount())
+                                .invoiceUrl(order.getInvoicePath())
                                 // Shipping
                                 .shippingAddress(order.getShippingAddress())
                                 .shippingCity(order.getShippingCity())
@@ -102,7 +105,8 @@ public class OrderResponse {
                                         .farmerName(order.getProduct().getFarmer().getFirstName() + " " +
                                                         (order.getProduct().getFarmer().getLastName() != null
                                                                         ? order.getProduct().getFarmer().getLastName()
-                                                                        : ""));
+                                                                        : ""))
+                                        .farmLocation(order.getProduct().getLocation());
                 }
 
                 return builder.build();

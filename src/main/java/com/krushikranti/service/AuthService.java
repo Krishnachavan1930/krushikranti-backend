@@ -1,24 +1,9 @@
 package com.krushikranti.service;
 
-import com.krushikranti.dto.request.LoginRequest;
-import com.krushikranti.dto.request.OtpVerifyRequest;
-import com.krushikranti.dto.request.RegisterRequest;
-import com.krushikranti.dto.request.ResendOtpRequest;
-import com.krushikranti.dto.request.ForgotPasswordRequest;
-import com.krushikranti.dto.request.CreateAdminRequest;
-import com.krushikranti.dto.request.VerifyResetOtpRequest;
-import com.krushikranti.dto.request.ResetPasswordRequest;
-import com.krushikranti.dto.response.AuthResponse;
-import com.krushikranti.dto.response.VerifyResetOtpResponse;
-import com.krushikranti.exception.DuplicateResourceException;
-import com.krushikranti.exception.EmailNotVerifiedException;
-import com.krushikranti.exception.InvalidOtpException;
-import com.krushikranti.exception.ResourceNotFoundException;
-import com.krushikranti.model.User;
-import com.krushikranti.repository.UserRepository;
-import com.krushikranti.security.JwtService;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import java.security.SecureRandom;
+import java.time.LocalDateTime;
+import java.util.UUID;
+
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -26,9 +11,27 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.security.SecureRandom;
-import java.time.LocalDateTime;
-import java.util.UUID;
+import com.krushikranti.dto.request.CreateAdminRequest;
+import com.krushikranti.dto.request.ForgotPasswordRequest;
+import com.krushikranti.dto.request.LoginRequest;
+import com.krushikranti.dto.request.OtpVerifyRequest;
+import com.krushikranti.dto.request.RegisterRequest;
+import com.krushikranti.dto.request.ResendOtpRequest;
+import com.krushikranti.dto.request.ResetPasswordRequest;
+import com.krushikranti.dto.request.VerifyResetOtpRequest;
+import com.krushikranti.dto.response.AuthResponse;
+import com.krushikranti.dto.response.VerifyResetOtpResponse;
+import com.krushikranti.exception.BadRequestException;
+import com.krushikranti.exception.DuplicateResourceException;
+import com.krushikranti.exception.EmailNotVerifiedException;
+import com.krushikranti.exception.InvalidOtpException;
+import com.krushikranti.exception.ResourceNotFoundException;
+import com.krushikranti.model.User;
+import com.krushikranti.repository.UserRepository;
+import com.krushikranti.security.JwtService;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
 @RequiredArgsConstructor
@@ -303,6 +306,30 @@ public class AuthService {
         emailService.sendPasswordResetConfirmationEmail(user.getEmail(), user.getFirstName());
 
         return "Password has been reset successfully. You can now login with your new password.";
+    }
+
+    @Transactional
+    public String changeAdminPassword(String email, String currentPassword, String newPassword) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("User", "email", email));
+
+        if (user.getRole() != User.Role.ROLE_ADMIN) {
+            throw new BadRequestException("Only admin users can change password from this endpoint");
+        }
+
+        if (!passwordEncoder.matches(currentPassword, user.getPassword())) {
+            throw new BadRequestException("Current password is incorrect");
+        }
+
+        if (passwordEncoder.matches(newPassword, user.getPassword())) {
+            throw new BadRequestException("New password must be different from current password");
+        }
+
+        user.setPassword(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
+
+        log.info("Admin password changed successfully for user: {}", user.getEmail());
+        return "Password updated successfully";
     }
 
     /**
